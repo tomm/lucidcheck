@@ -6,6 +6,57 @@ require 'set'
 # Sum type. ie Set[:str, nil] = String | nil
 S = Set
 
+class RScopeBinding
+  attr_accessor :name, :type
+  def initialize(name, type)
+    @name = name
+    @type = type
+  end
+end
+
+class Rlvar < RScopeBinding
+end
+
+class Rconst < RScopeBinding
+end
+
+class Rfunc < RScopeBinding
+  def initialize(name, return_type, arg_types)
+    super(name, return_type)
+    @arg_types = arg_types
+  end
+
+  # @returns [return_type, errors]
+  # updates @arg_types with param types if nil
+  def called_by!(node, args)
+    args.each_with_index {|a,i|
+      if a == nil
+        return [@type, [type_error(node, args)]]
+      end
+    }
+    if args.length != @arg_types.length
+      return [@type, [[node, :fn_arg_num, @name, @arg_types.length, args.length]]]
+    end
+
+    # collect arg types if we know none
+    if @arg_types == [nil]*@arg_types.length
+      @arg_types = args
+    end
+
+    if @arg_types != args
+      return [@type, [type_error(node, args)]]
+    end
+
+    [@type, []]
+  end
+
+  private
+
+  def type_error(node, args)
+    [node, :fn_arg_type, @name, @arg_types.map(&:to_s).join(','), args.map(&:to_s).join(',')]
+  end
+end
+
 class Context
   def self.error_msg(filename, e)
     "Error in #{filename} line #{e[0].loc.line}: " +
@@ -18,6 +69,10 @@ class Context
         "Function '#{e[2]}' arguments have inferred type (#{e[3]}) but was passed (#{e[4]})"
       when :var_type
         "Cannot reassign variable '#{e[2]}' of type #{e[3]} with value of type #{e[4]}"
+      when :inference_failed
+        "Cannot infer type. Annotation needed."
+      when :const_redef
+        "Cannot redefine constant '#{e[2]}'"
       when :unexpected
         "No parse! (token #{e[0].type})"
       else
@@ -27,50 +82,52 @@ class Context
 
   def initialize(source)
     @scope = {
-      require: [:fn, 1, ['str'], nil],
-      puts: [:fn, 1, ['str'], :nil]
+      require: Rfunc.new('require', :void, ['str']),
+      puts: Rfunc.new('puts', :void, ['str']),
     }
     @errors = []
     @ast = Parser::CurrentRuby.parse(source)
   end
 
   def check
-    n_root(@ast)
+    n_expr(@ast)
     @errors
   end
 
   private
 
-  def n_root(node)
+  #: returns type
+  def n_expr(node)
     if node == nil
       return
     end
     case node.type
     when :begin
-      node.children.map { |child| n_root(child) }.flatten
+      node.children.map { |child| n_expr(child) }.flatten
     when :def
       n_def(node)
+    when :lvar
+      @scope[node.children[0]].type
+    when :dstr # XXX could check dstr
+      'str'
     when :send
       n_send(node)
     when :lvasgn
       n_lvasgn(node)
+    when :casgn
+      n_casgn(node)
     when :class
       # ignore for now :)
     when :module
       # ignore for now :)
-    else
-      unexpected!("root node", node)
-    end
-  end
-
-  def n_typeof_rval(node)
-    case node.type
-    when :lvar
-      @scope[node.children[0]]&.[](3)
-    when :send
-      n_send(node)
-    when :dstr # XXX could check dstr
-      'str'
+    when :if
+      type1 = n_expr(node.children[1])
+      type2 = n_expr(node.children[2])
+      if type1 == type2
+        type1
+      else
+        "#{type1}|#{type2}"
+      end
     else
       node.type.to_s
     end
@@ -78,22 +135,31 @@ class Context
 
   def n_lvasgn(node)
     name = node.children[0]
-    type = n_typeof_rval(node.children[1])
+    type = n_expr(node.children[1])
 
     if type == nil
-      # can't type check. bail
-      puts "warning -- skipping type check in lvasgn, line #{node.loc.line}"
-      return
+      @errors << [node, :inference_failed]
+    elsif type == :error
+      # error happened in resolving type. don't report another error
+    elsif @scope[name] == nil
+      @scope[name] = Rlvar.new(name, type)
+    elsif @scope[name].type != type
+      @errors << [node, :var_type, name, @scope[name].type, type]
     end
+  end
 
-    _def = [:lvar, 0, [], type]
+  def n_casgn(node)
+    name = node.children[1]
+    type = n_expr(node.children[2])
 
-    if type == :send
-      @errors << [node, :unexpected]
-    elsif @scope[name] != nil && @scope[name] != _def
-      @errors << [node, :var_type, name, @scope[name][3], type]
+    if type == nil
+      @errors << [node, :inference_failed]
+    elsif type == :error
+      # error happened in resolving type. don't report another error
+    elsif @scope[name] == nil
+      @scope[name] = Rconst.new(name, type)
     else
-      @scope[name] = [:lvar, 0, [], type]
+      @errors << [node, :const_redef, name]
     end
   end
 
@@ -103,35 +169,36 @@ class Context
     unexpected!("call with self?? value", node) if _self != nil
 
     name = node.children[1]
-    arg_types = node.children[2..-1].map {|n| n_typeof_rval(n) }
+    arg_types = node.children[2..-1].map {|n| n_expr(n) }
     num_args = arg_types.length
 
     if @scope[name] == nil
       @errors << [node, :fn_unknown, name]
       return
-    elsif @scope[name][1] != num_args
-      @errors << [node, :fn_arg_num, name, @scope[name][1], num_args]
+    elsif @scope[name].instance_of?(Rfunc)
+      return_type, errors = @scope[name].called_by!(node, arg_types)
+      @errors = @errors + errors
+      if return_type == nil and !errors.empty?
+        return :error
+      else
+        return return_type
+      end
+    else
+      @errors << [node, :not_a_function, name]
       return
     end
-
-    if @scope[name][2] == [nil]*@scope[name][1]
-      # argument types not known yet. can set from this first call
-      @scope[name][2] = arg_types
-    elsif @scope[name][2] != arg_types
-      @errors << [node, :fn_arg_type, name,
-                  @scope[name][2].map(&:to_s).join(','),
-                  arg_types.map(&:to_s).join(',')]
-      return
-    end
-    # well-typed call
-    @scope[name][3]
   end
 
   def n_def(node)
     name = node.children[0]
     num_args = node.children[1].children.length
-    return_type = n_typeof_rval(node.children[2])
-    @scope[name] = [:fn, num_args, [nil]*num_args, return_type]
+    if node.children[2] == nil
+      return_type = :void
+    else
+      return_type = n_expr(node.children[2])
+    end
+    # define function with no known argument types (so far)
+    @scope[name] = Rfunc.new(name, return_type, [nil]*num_args)
   end
 
   def unexpected!(position, node)

@@ -25,4 +25,7 @@ class TestLudidCheck < Test::Unit::TestCase
     assert_equal([21, :var_type, :z, 'int', 'true'], es[5])
     assert_equal(nil, es[6])
   end
+
+  def test_fnproto
+  end
 end
