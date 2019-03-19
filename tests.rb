@@ -14,15 +14,15 @@ def parse(filename)
   )
 end
 
-class TestTurbocop < Test::Unit::TestCase
+class TestLudidCheck < Test::Unit::TestCase
   def test_example1
-    assert_equal(
-      [
-        [5, :fn_unknown, :hello],
-        [6, :fn_arg_num, :hi, 1, 2],
-        [8, :fn_arg_type, :hi, 'str', 'int']
-      ],
-      parse('example1.rb')
-    )
+    es = parse('tests/test1.rb')
+    assert_equal([5, :fn_unknown, :hello], es[0])
+    assert_equal([6, :fn_arg_num, :hi, 1, 2], es[1])
+    assert_equal([8, :fn_arg_type, :hi, 'str', 'int'], es[2])
+    assert_equal([12, :var_type, :x, 'str', 'int'], es[3])
+    assert_equal([19, :fn_arg_num, :returns_int, 0, 1], es[4])
+    assert_equal([21, :var_type, :z, 'int', 'true'], es[5])
+    assert_equal(nil, es[6])
   end
 end

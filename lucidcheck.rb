@@ -1,6 +1,10 @@
 #!/usr/bin/env ruby
 require 'parser/current'
 require 'pry'
+require 'set'
+
+# Sum type. ie Set[:str, nil] = String | nil
+S = Set
 
 class Context
   def self.error_msg(filename, e)
@@ -12,8 +16,10 @@ class Context
         "Function '#{e[2]}' expected #{e[3]} arguments but found #{e[4]}"
       when :fn_arg_type
         "Function '#{e[2]}' arguments have inferred type (#{e[3]}) but was passed (#{e[4]})"
+      when :var_type
+        "Cannot reassign variable '#{e[2]}' of type #{e[3]} with value of type #{e[4]}"
       when :unexpected
-        "No parse! Turbocop doesn't understand this file! (token #{e[0].type})"
+        "No parse! (token #{e[0].type})"
       else
         e.to_s
       end
@@ -21,7 +27,8 @@ class Context
 
   def initialize(source)
     @scope = {
-      require: [1, [:str], nil]
+      require: [:fn, 1, ['str'], nil],
+      puts: [:fn, 1, ['str'], :nil]
     }
     @errors = []
     @ast = Parser::CurrentRuby.parse(source)
@@ -37,54 +44,94 @@ class Context
   def n_root(node)
     if node == nil
       return
-    elsif node.type == :begin
+    end
+    case node.type
+    when :begin
       node.children.map { |child| n_root(child) }.flatten
-    elsif node.type == :def
+    when :def
       n_def(node)
-    elsif node.type == :send
+    when :send
       n_send(node)
-    elsif node.type == :class
+    when :lvasgn
+      n_lvasgn(node)
+    when :class
       # ignore for now :)
-    elsif node.type == :module
+    when :module
       # ignore for now :)
     else
       unexpected!("root node", node)
     end
   end
 
+  def n_typeof_rval(node)
+    case node.type
+    when :lvar
+      @scope[node.children[0]]&.[](3)
+    when :send
+      n_send(node)
+    when :dstr # XXX could check dstr
+      'str'
+    else
+      node.type.to_s
+    end
+  end
+
+  def n_lvasgn(node)
+    name = node.children[0]
+    type = n_typeof_rval(node.children[1])
+
+    if type == nil
+      # can't type check. bail
+      puts "warning -- skipping type check in lvasgn, line #{node.loc.line}"
+      return
+    end
+
+    _def = [:lvar, 0, [], type]
+
+    if type == :send
+      @errors << [node, :unexpected]
+    elsif @scope[name] != nil && @scope[name] != _def
+      @errors << [node, :var_type, name, @scope[name][3], type]
+    else
+      @scope[name] = [:lvar, 0, [], type]
+    end
+  end
+
+  # returns return type of method/function (or nil if not determined)
   def n_send(node)
     _self = node.children[0]
     unexpected!("call with self?? value", node) if _self != nil
 
     name = node.children[1]
-    arg_types = node.children[2..-1].map(&:type)
+    arg_types = node.children[2..-1].map {|n| n_typeof_rval(n) }
     num_args = arg_types.length
 
     if @scope[name] == nil
       @errors << [node, :fn_unknown, name]
       return
-    elsif @scope[name][0] != num_args
-      @errors << [node, :fn_arg_num, name, @scope[name][0], num_args]
+    elsif @scope[name][1] != num_args
+      @errors << [node, :fn_arg_num, name, @scope[name][1], num_args]
       return
     end
 
-    if @scope[name][1] == [nil]*@scope[name][0]
+    if @scope[name][2] == [nil]*@scope[name][1]
       # argument types not known yet. can set from this first call
-      @scope[name][1] = arg_types
-    end
-
-    if @scope[name][1] != arg_types
+      @scope[name][2] = arg_types
+    elsif @scope[name][2] != arg_types
       @errors << [node, :fn_arg_type, name,
-                  @scope[name][1].map(&:to_s).join(','),
+                  @scope[name][2].map(&:to_s).join(','),
                   arg_types.map(&:to_s).join(',')]
       return
     end
+    # well-typed call
+    @scope[name][3]
   end
 
   def n_def(node)
     name = node.children[0]
     num_args = node.children[1].children.length
-    @scope[name] = [num_args, [nil]*num_args, nil]
+    return_type = n_typeof_rval(node.children[2])
+    @scope[name] = [:fn, num_args, [nil]*num_args, return_type]
   end
 
   def unexpected!(position, node)
