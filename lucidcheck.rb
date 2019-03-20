@@ -74,7 +74,7 @@ class Context
       when :const_redef
         "Cannot redefine constant '#{e[2]}'"
       when :unexpected
-        "No parse! (token #{e[0].type})"
+        "LucidCheck bug! No parse: token #{e[0].type}"
       else
         e.to_s
       end
@@ -84,6 +84,7 @@ class Context
     @scope = {
       require: Rfunc.new('require', :void, ['str']),
       puts: Rfunc.new('puts', :void, ['str']),
+      exit: Rfunc.new('exit', :void, ['int']),
     }
     @errors = []
     @ast = Parser::CurrentRuby.parse(source)
@@ -103,13 +104,11 @@ class Context
     end
     case node.type
     when :begin
-      node.children.map { |child| n_expr(child) }.flatten
+      node.children.map { |child| n_expr(child) }.last
     when :def
       n_def(node)
     when :lvar
       @scope[node.children[0]].type
-    when :dstr # XXX could check dstr
-      'str'
     when :send
       n_send(node)
     when :lvasgn
@@ -128,8 +127,21 @@ class Context
       else
         "#{type1}|#{type2}"
       end
+    when :int
+      'int'
+    when :str
+      'str'
+    when :dstr # XXX could check dstr
+      'str'
+    when :true
+      'boolean'
+    when :false
+      'boolean'
+    when :const
+      node.children[1].to_s
     else
-      node.type.to_s
+      @errors << [node, :unexpected]
+      nil
     end
   end
 
