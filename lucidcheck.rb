@@ -6,7 +6,7 @@ require 'set'
 # Sum type. ie Set[:str, nil] = String | nil
 S = Set
 
-class RScopeBinding
+class Rscopebinding
   attr_accessor :name, :type
   def initialize(name, type)
     @name = name
@@ -14,13 +14,13 @@ class RScopeBinding
   end
 end
 
-class Rlvar < RScopeBinding
+class Rlvar < Rscopebinding
 end
 
-class Rconst < RScopeBinding
+class Rconst < Rscopebinding
 end
 
-class Rfunc < RScopeBinding
+class Rfunc < Rscopebinding
   def initialize(name, return_type, arg_types)
     super(name, return_type)
     @arg_types = arg_types
@@ -35,7 +35,7 @@ class Rfunc < RScopeBinding
       end
     }
     if args.length != @arg_types.length
-      return [@type, [[node, :fn_arg_num, @name, @arg_types.length, args.length]]]
+      return [@type, [[node, :fn_arg_num, @name, @arg_types.length-1, args.length-1]]]
     end
 
     # collect arg types if we know none
@@ -53,8 +53,56 @@ class Rfunc < RScopeBinding
   private
 
   def type_error(node, args)
-    [node, :fn_arg_type, @name, @arg_types.map(&:to_s).join(','), args.map(&:to_s).join(',')]
+    [node, :fn_arg_type, @name, @arg_types.drop(1).map(&:to_s).join(','), args.drop(1).map(&:to_s).join(',')]
   end
+end
+
+class Rclass < Rscopebinding
+  def initialize(name, parent_class, rmethods)
+    super(name, self)
+    @parent = parent_class
+    @rmethods = rmethods
+  end
+
+  def lookup(method_name)
+    m = @rmethods[method_name]
+    if m
+      m
+    elsif @parent
+      @parent.lookup(method_name)
+    else
+      nil
+    end
+  end
+
+  def define(rscopebinding)
+    @rmethods[rscopebinding.name] = rscopebinding
+  end
+end
+
+def make_root
+  robject = Rclass.new(
+    'Object',
+    nil,
+    {
+      require: Rfunc.new('require', :void, [:void, 'String']),
+      puts: Rfunc.new('puts', :void, [:void, 'String']),
+      exit: Rfunc.new('exit', :void, [:void, 'Integer']),
+    }
+  )
+  robject.define(Rclass.new(
+      'String',
+      robject,
+      {
+        upcase: Rfunc.new('upcase', 'String', ['String']),
+      }
+  ))
+  robject.define(Rclass.new(
+    'Integer',
+    robject,
+    {}
+  ))
+  robject
 end
 
 class Context
@@ -62,7 +110,7 @@ class Context
     "Error in #{filename} line #{e[0].loc.line}: " +
       case e[1]
       when :fn_unknown
-        "Unknown function '#{e[2]}'"
+        "Type '#{e[3]}' has no method named '#{e[2]}'"
       when :fn_arg_num
         "Function '#{e[2]}' expected #{e[3]} arguments but found #{e[4]}"
       when :fn_arg_type
@@ -81,11 +129,7 @@ class Context
   end
 
   def initialize(source)
-    @scope = {
-      require: Rfunc.new('require', :void, ['str']),
-      puts: Rfunc.new('puts', :void, ['str']),
-      exit: Rfunc.new('exit', :void, ['int']),
-    }
+    @scope = make_root()
     @errors = []
     @ast = Parser::CurrentRuby.parse(source)
   end
@@ -108,7 +152,7 @@ class Context
     when :def
       n_def(node)
     when :lvar
-      @scope[node.children[0]].type
+      @scope.lookup(node.children[0]).type
     when :send
       n_send(node)
     when :lvasgn
@@ -128,17 +172,17 @@ class Context
         "#{type1}|#{type2}"
       end
     when :int
-      'int'
+      'Integer'
     when :str
-      'str'
+      'String'
     when :dstr # XXX could check dstr
-      'str'
+      'String'
     when :true
-      'boolean'
+      'Boolean'
     when :false
-      'boolean'
+      'Boolean'
     when :const
-      node.children[1].to_s
+      @scope.lookup(node.children[1]).type
     else
       @errors << [node, :unexpected]
       nil
@@ -153,10 +197,10 @@ class Context
       @errors << [node, :inference_failed]
     elsif type == :error
       # error happened in resolving type. don't report another error
-    elsif @scope[name] == nil
-      @scope[name] = Rlvar.new(name, type)
-    elsif @scope[name].type != type
-      @errors << [node, :var_type, name, @scope[name].type, type]
+    elsif @scope.lookup(name) == nil
+      @scope.define(Rlvar.new(name, type))
+    elsif @scope.lookup(name).type != type
+      @errors << [node, :var_type, name, @scope.lookup(name).type, type]
     end
   end
 
@@ -168,8 +212,8 @@ class Context
       @errors << [node, :inference_failed]
     elsif type == :error
       # error happened in resolving type. don't report another error
-    elsif @scope[name] == nil
-      @scope[name] = Rconst.new(name, type)
+    elsif @scope.lookup(name) == nil
+      @scope.define(Rconst.new(name, type))
     else
       @errors << [node, :const_redef, name]
     end
@@ -177,18 +221,23 @@ class Context
 
   # returns return type of method/function (or nil if not determined)
   def n_send(node)
-    _self = node.children[0]
-    unexpected!("call with self?? value", node) if _self != nil
-
+    self_type = node.children[0] ? n_expr(node.children[0]) : :void
+    if self_type != :void
+      scope = @scope.lookup(self_type)
+      raise "Checker bug: Type unknown: #{self_type}" if scope == nil
+    else
+      scope = @scope
+    end
     name = node.children[1]
-    arg_types = node.children[2..-1].map {|n| n_expr(n) }
+    # consider 'self' to be a normal param
+    arg_types = [self_type] + node.children[2..-1].map {|n| n_expr(n) }
     num_args = arg_types.length
 
-    if @scope[name] == nil
-      @errors << [node, :fn_unknown, name]
+    if scope.lookup(name) == nil
+      @errors << [node, :fn_unknown, name, scope.name]
       return
-    elsif @scope[name].instance_of?(Rfunc)
-      return_type, errors = @scope[name].called_by!(node, arg_types)
+    elsif scope.lookup(name).instance_of?(Rfunc)
+      return_type, errors = scope.lookup(name).called_by!(node, arg_types)
       @errors = @errors + errors
       if return_type == nil and !errors.empty?
         return :error
@@ -210,7 +259,7 @@ class Context
       return_type = n_expr(node.children[2])
     end
     # define function with no known argument types (so far)
-    @scope[name] = Rfunc.new(name, return_type, [nil]*num_args)
+    @scope.define(Rfunc.new(name, return_type, [nil]*(num_args+1)))
   end
 
   def unexpected!(position, node)
