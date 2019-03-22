@@ -43,7 +43,8 @@ class Rfunc < Rscopebinding
       @arg_types = args
     end
 
-    if @arg_types != args
+    # check arg types. ignore first argument, since we have already resolved class lookup
+    if @arg_types.drop(1) != args.drop(1)
       return [@type, [type_error(node, args)]]
     end
 
@@ -59,7 +60,7 @@ end
 
 class Rclass < Rscopebinding
   def initialize(name, parent_class, rmethods)
-    super(name, self)
+    super(name, name)
     @parent = parent_class
     @rmethods = rmethods
   end
@@ -129,9 +130,22 @@ class Context
   end
 
   def initialize(source)
-    @scope = make_root()
+    @robject = make_root()
+    @scope = [@robject]
     @errors = []
     @ast = Parser::CurrentRuby.parse(source)
+  end
+
+  def push_scope(scope)
+    @scope.push(scope)
+  end
+
+  def pop_scope
+    @scope.pop
+  end
+
+  def scope_top
+    @scope.last
   end
 
   def check
@@ -152,7 +166,7 @@ class Context
     when :def
       n_def(node)
     when :lvar
-      @scope.lookup(node.children[0]).type
+      scope_top.lookup(node.children[0]).type
     when :send
       n_send(node)
     when :lvasgn
@@ -160,7 +174,7 @@ class Context
     when :casgn
       n_casgn(node)
     when :class
-      # ignore for now :)
+      n_class(node)
     when :module
       # ignore for now :)
     when :if
@@ -182,11 +196,30 @@ class Context
     when :false
       'Boolean'
     when :const
-      @scope.lookup(node.children[1]).type
+      scope_top.lookup(node.children[1]).type
     else
       @errors << [node, :unexpected]
       nil
     end
+  end
+
+  def n_class(node)
+    class_name = node.children[0].children[1].to_s
+    parent_class_name = node.children[1]&.children&.last&.to_s
+    parent_class = parent_class_name == nil ? @robject : scope_top.lookup(parent_class_name),
+
+    new_class = Rclass.new(
+      class_name,
+      parent_class,
+      {}
+    )
+    scope_top.define(new_class)
+
+    push_scope(new_class)
+    r = n_expr(node.children[2])
+    pop_scope()
+
+    r
   end
 
   def n_lvasgn(node)
@@ -197,10 +230,10 @@ class Context
       @errors << [node, :inference_failed]
     elsif type == :error
       # error happened in resolving type. don't report another error
-    elsif @scope.lookup(name) == nil
-      @scope.define(Rlvar.new(name, type))
-    elsif @scope.lookup(name).type != type
-      @errors << [node, :var_type, name, @scope.lookup(name).type, type]
+    elsif scope_top.lookup(name) == nil
+      scope_top.define(Rlvar.new(name, type))
+    elsif scope_top.lookup(name).type != type
+      @errors << [node, :var_type, name, scope_top.lookup(name).type, type]
     end
   end
 
@@ -212,8 +245,8 @@ class Context
       @errors << [node, :inference_failed]
     elsif type == :error
       # error happened in resolving type. don't report another error
-    elsif @scope.lookup(name) == nil
-      @scope.define(Rconst.new(name, type))
+    elsif scope_top.lookup(name) == nil
+      scope_top.define(Rconst.new(name, type))
     else
       @errors << [node, :const_redef, name]
     end
@@ -223,10 +256,10 @@ class Context
   def n_send(node)
     self_type = node.children[0] ? n_expr(node.children[0]) : :void
     if self_type != :void
-      scope = @scope.lookup(self_type)
+      scope = scope_top.lookup(self_type)
       raise "Checker bug: Type unknown: #{self_type}" if scope == nil
     else
-      scope = @scope
+      scope = scope_top
     end
     name = node.children[1]
     # consider 'self' to be a normal param
@@ -259,7 +292,7 @@ class Context
       return_type = n_expr(node.children[2])
     end
     # define function with no known argument types (so far)
-    @scope.define(Rfunc.new(name, return_type, [nil]*(num_args+1)))
+    scope_top.define(Rfunc.new(name, return_type, [nil]*(num_args+1)))
   end
 
   def unexpected!(position, node)
