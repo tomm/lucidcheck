@@ -3,9 +3,6 @@ require 'parser/current'
 require 'pry'
 require 'set'
 
-# Sum type. ie Set[:str, nil] = String | nil
-S = Set
-
 class Rscopebinding
   attr_accessor :name, :type
   def initialize(name, type)
@@ -194,7 +191,7 @@ class Context
       if type1 == type2
         type1
       else
-        "#{type1}|#{type2}"
+        raise "Sum types not yet supported"
       end
     when :float
       type_lookup!(node, @robject, 'Float')
@@ -224,12 +221,11 @@ class Context
   def n_class(node)
     class_name = node.children[0].children[1].to_s
     parent_class_name = node.children[1]&.children&.last&.to_s
-    parent_class = parent_class_name == nil ? @robject : scope_top.lookup(parent_class_name),
+    parent_class = parent_class_name == nil ? @robject : scope_top.lookup(parent_class_name)
 
     new_class = Rclass.new(
       class_name,
-      parent_class,
-      {}
+      parent_class
     )
     scope_top.define(new_class)
 

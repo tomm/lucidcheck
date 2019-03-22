@@ -102,4 +102,25 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
   end
+
+  def test_class
+    assert_equal(
+      [],
+      parse_str(
+        <<-RUBY
+          class A
+            def hi(name)
+              puts "hey #{name}"
+            end
+          end
+          
+          class B < A
+            def oi(name)
+              puts "oi #{name}"
+            end
+          end
+        RUBY
+      )
+    )
+  end
 end
