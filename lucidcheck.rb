@@ -18,6 +18,12 @@ class Rthing
   end
 end
 
+class Rundefined < Rthing
+  def initialize
+    super(:undefined, nil)
+  end
+end
+
 class Rlvar < Rthing
 end
 
@@ -108,6 +114,7 @@ def make_root
   rstring  = robject.define(Rclass.new('String', robject))
   rvoid    = robject.define(Rclass.new(:void, robject))
   rinteger = robject.define(Rclass.new('Integer', robject))
+  rfloat   = robject.define(Rclass.new('Float', robject))
   rboolean = robject.define(Rclass.new('Boolean', robject))
   
   robject.define(Rfunc.new('require', rvoid, [rvoid, rstring]))
@@ -115,6 +122,18 @@ def make_root
   robject.define(Rfunc.new('exit', rvoid, [rvoid, rinteger]))
 
   rstring.define(Rfunc.new('upcase', rstring, [rstring]))
+
+  rinteger.define(Rfunc.new('+', rinteger, [rvoid, rinteger]))
+  rinteger.define(Rfunc.new('-', rinteger, [rvoid, rinteger]))
+  rinteger.define(Rfunc.new('*', rinteger, [rvoid, rinteger]))
+  rinteger.define(Rfunc.new('/', rinteger, [rvoid, rinteger]))
+  rinteger.define(Rfunc.new('to_f', rfloat, [rinteger]))
+
+  rfloat.define(Rfunc.new('+', rfloat, [rvoid, rfloat]))
+  rfloat.define(Rfunc.new('-', rfloat, [rvoid, rfloat]))
+  rfloat.define(Rfunc.new('*', rfloat, [rvoid, rfloat]))
+  rfloat.define(Rfunc.new('/', rfloat, [rvoid, rfloat]))
+  rfloat.define(Rfunc.new('to_i', rinteger, [rfloat]))
 
   robject
 end
@@ -147,6 +166,7 @@ class Context
   def initialize(source)
     @robject = make_root()
     @rvoid = @robject.lookup(:void)
+    @rundefined = Rundefined.new
     @scope = [@robject]
     @errors = []
     @ast = Parser::CurrentRuby.parse(source)
@@ -187,6 +207,8 @@ class Context
       scope_top.lookup(node.children[0].to_s).type
     when :send
       n_send(node)
+    when :ivasgn
+      n_ivasgn(node)
     when :lvasgn
       n_lvasgn(node)
     when :casgn
@@ -221,6 +243,7 @@ class Context
         c.type
       else
         @errors << [node, :const_unknown, node.children[1].to_s]
+        @rundefined
       end
     else
       raise "Unexpected #{node}"
@@ -254,10 +277,10 @@ class Context
   def type_lookup!(node, scope, type_identifier)
     if type_identifier == nil
       @errors << [node, :inference_failed]
-      return nil
+      return @rundefined
     elsif type_identifier == :error
       # error happened in resolving type. don't report another error
-      return nil
+      return @rundefined
     end
 
     type = scope.lookup(type_identifier)
@@ -265,10 +288,15 @@ class Context
     if type == nil then
       # type not found
       @errors << [node, :type_unknown, type_identifier]
-      return nil
+      return @rundefined
     else
       return type
     end
+  end
+
+  # assign instance variable
+  def n_ivasgn(node)
+    binding.pry
   end
 
   def n_lvasgn(node)
@@ -302,8 +330,8 @@ class Context
     name = node.children[1].to_s
     self_type = node.children[0] ? n_expr(node.children[0]) : @rvoid
     if self_type != @rvoid
-      if self_type == nil
-        raise "Checker bug: Type unknown: #{self_type}"
+      if self_type.kind_of?(Rundefined)
+        return self_type
       else
         scope = self_type
       end
@@ -317,18 +345,18 @@ class Context
 
     if scope.lookup(name) == nil
       @errors << [node, :fn_unknown, name, scope.name]
-      return
+      return @rundefined
     elsif scope.lookup(name).kind_of?(Rfunc)
       return_type, errors = scope.lookup(name).called_by!(node, arg_types)
       @errors = @errors + errors
       if return_type == nil and !errors.empty?
-        return :error
+        return @rundefined
       else
         return return_type
       end
     else
       @errors << [node, :not_a_function, name]
-      return
+      return @rundefined
     end
   end
 
@@ -352,6 +380,10 @@ class Context
     num_args = node.children[1].children.length
     # define function with no known argument types (so far)
     if name == 'initialize'
+      if node.children[2] != nil
+        # evaluate just to walk body.
+        n_expr(node.children[2])
+      end
       # assume return type for 'new' method
       scope_top.metaclass.define(Rfunc.new('new', scope_top, [nil]*(num_args+1)))
     else

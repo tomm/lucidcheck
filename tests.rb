@@ -51,7 +51,8 @@ class TestLucidCheck < Test::Unit::TestCase
     assert_equal(
       [[2, :const_redef, 'MyConst'],
        [4, :var_type, 'x', 'Integer', 'String'],
-       [5, :const_unknown, 'Huh']],
+       [5, :const_unknown, 'Huh'],
+       [6, :const_unknown, 'What']],
       parse_str(
         <<-RUBY
           MyConst = 123
@@ -59,6 +60,7 @@ class TestLucidCheck < Test::Unit::TestCase
           x = MyConst
           x = 'poo'
           Huh
+          z = What.new
         RUBY
       )
     )
@@ -138,6 +140,22 @@ class TestLucidCheck < Test::Unit::TestCase
           a = A.new('Ms')
           a.hi('sam')
           a.oi('emma')
+        RUBY
+      )
+    )
+  end
+
+  def test_arithmetic
+    assert_equal(
+      [[3, :fn_arg_type, '*', 'Float', 'Integer'],
+       [5, :fn_arg_type, '/', 'Integer', 'Float']],
+      parse_str(
+        <<-RUBY
+          x = 1 + 1
+          y = 2 * x
+          z = 4.0 * y
+          z = (4.0 + x.to_f) * y.to_f
+          y = y / z
         RUBY
       )
     )
