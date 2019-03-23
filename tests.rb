@@ -105,10 +105,15 @@ class TestLucidCheck < Test::Unit::TestCase
 
   def test_class
     assert_equal(
-      [],
+      [[23, :fn_unknown, 'wrong', 'B'],
+       [24, :var_type, 'b', 'B', 'Integer'],
+       [28, :fn_unknown, 'oi', 'A']],
       parse_str(
         <<-RUBY
           class A
+            def initialize(title)
+            end
+
             def hi(name)
               puts "hey #{name}"
             end
@@ -118,7 +123,21 @@ class TestLucidCheck < Test::Unit::TestCase
             def oi(name)
               puts "oi #{name}"
             end
+
+            def self.foo(x, y)
+            end
           end
+
+          B.foo(1,2)
+          b = B.new
+          b.oi('tom')
+          b.hi('bob')
+          b.wrong()
+          b = 12
+
+          a = A.new('Ms')
+          a.hi('sam')
+          a.oi('emma')
         RUBY
       )
     )

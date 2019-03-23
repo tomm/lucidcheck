@@ -3,13 +3,13 @@ require 'parser/current'
 require 'pry'
 require 'set'
 
-class Rscopebinding
-  attr_accessor :name, :type
+class Rthing
+  attr_reader :name, :type
   def initialize(name, type)
     @name = name
     @type = type
-    if type && !type.kind_of?(Rscopebinding)
-      raise "Weird type passed to Rscopebinding.initialize: #{type} (#{type.class})"
+    if type && !type.kind_of?(Rthing)
+      raise "Weird type passed to Rthing.initialize: #{type} (#{type.class})"
     end
   end
 
@@ -18,13 +18,13 @@ class Rscopebinding
   end
 end
 
-class Rlvar < Rscopebinding
+class Rlvar < Rthing
 end
 
-class Rconst < Rscopebinding
+class Rconst < Rthing
 end
 
-class Rfunc < Rscopebinding
+class Rfunc < Rthing
   def initialize(name, return_type, arg_types)
     super(name, return_type)
     @arg_types = arg_types
@@ -62,15 +62,25 @@ class Rfunc < Rscopebinding
   end
 end
 
-class Rmetaclass < Rscopebinding
-  def initialize
-    super('Class', nil)
+class Rmetaclass < Rthing
+  def initialize(parent_name)
+    super("#{parent_name}::Class", nil)
+    @rmethods = {}
+  end
+
+  def lookup(method_name)
+    @rmethods[method_name]
+  end
+
+  def define(rscopebinding)
+    @rmethods[rscopebinding.name] = rscopebinding
   end
 end
 
-class Rclass < Rscopebinding
+class Rclass < Rthing
+  attr_reader :metaclass
   def initialize(name, parent_class)
-    @metaclass = Rmetaclass.new
+    @metaclass = Rmetaclass.new(name)
     super(name, @metaclass)
     @parent = parent_class
     @rmethods = {}
@@ -129,8 +139,6 @@ class Context
         "Cannot infer type. Annotation needed."
       when :const_redef
         "Cannot redefine constant '#{e[2]}'"
-      when :unexpected
-        "LucidCheck bug! No parse: token #{e[0].type}"
       else
         e.to_s
       end
@@ -173,6 +181,8 @@ class Context
       node.children.map { |child| n_expr(child) }.last
     when :def
       n_def(node)
+    when :defs # define static method
+      n_defs(node)
     when :lvar
       scope_top.lookup(node.children[0].to_s).type
     when :send
@@ -213,8 +223,7 @@ class Context
         @errors << [node, :const_unknown, node.children[1].to_s]
       end
     else
-      @errors << [node, :unexpected]
-      nil
+      raise "Unexpected #{node}"
     end
   end
 
@@ -231,6 +240,12 @@ class Context
 
     push_scope(new_class)
     r = n_expr(node.children[2])
+
+    # define a 'new' static method if 'initialize' was not defined
+    if scope_top.metaclass.lookup('new') == nil
+      scope_top.metaclass.define(Rfunc.new('new', scope_top, [nil]))
+    end
+
     pop_scope()
 
     r
@@ -284,10 +299,14 @@ class Context
 
   # returns return type of method/function (or nil if not determined)
   def n_send(node)
+    name = node.children[1].to_s
     self_type = node.children[0] ? n_expr(node.children[0]) : @rvoid
     if self_type != @rvoid
-      scope = self_type
-      raise "Checker bug: Type unknown: #{self_type}" if scope == nil
+      if self_type == nil
+        raise "Checker bug: Type unknown: #{self_type}"
+      else
+        scope = self_type
+      end
     else
       scope = scope_top
     end
@@ -313,20 +332,36 @@ class Context
     end
   end
 
+  # define static method
+  def n_defs(node)
+    if node.children[0].type != :self
+      raise "Expected self at #{node}"
+    end
+    name = node.children[1].to_s
+    num_args = node.children[2].children.length
+    if node.children[3] == nil
+      return_type = @rvoid
+    else
+      return_type = n_expr(node.children[3])
+    end
+    scope_top.metaclass.define(Rfunc.new(name, return_type, [nil]*(num_args+1)))
+  end
+
   def n_def(node)
     name = node.children[0].to_s
     num_args = node.children[1].children.length
-    if node.children[2] == nil
-      return_type = @rvoid
-    else
-      return_type = n_expr(node.children[2])
-    end
     # define function with no known argument types (so far)
-    scope_top.define(Rfunc.new(name, return_type, [nil]*(num_args+1)))
-  end
-
-  def unexpected!(position, node)
-    @errors << [node, :unexpected]
+    if name == 'initialize'
+      # assume return type for 'new' method
+      scope_top.metaclass.define(Rfunc.new('new', scope_top, [nil]*(num_args+1)))
+    else
+      if node.children[2] == nil
+        return_type = @rvoid
+      else
+        return_type = n_expr(node.children[2])
+      end
+      scope_top.define(Rfunc.new(name, return_type, [nil]*(num_args+1)))
+    end
   end
 end
 
