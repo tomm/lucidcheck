@@ -44,6 +44,7 @@ class Rthing
   end
 end
 
+# when type inference fails
 class Rundefined < Rthing
   def initialize
     super(:undefined, nil)
@@ -131,14 +132,14 @@ def make_root
   # denny is right
   rstring  = robject.define(Rclass.new('String', robject))
   rsymbol  = robject.define(Rclass.new('Symbol', robject))
-  rvoid    = robject.define(Rclass.new(:void, robject))
+  rnil     = robject.define(Rclass.new(:nil, robject))
   rinteger = robject.define(Rclass.new('Integer', robject))
   rfloat   = robject.define(Rclass.new('Float', robject))
   rboolean = robject.define(Rclass.new('Boolean', robject))
   
-  robject.define(Rfunc.new('require', rvoid, [rstring]))
-  robject.define(Rfunc.new('puts', rvoid, [rstring]))
-  robject.define(Rfunc.new('exit', rvoid, [rinteger]))
+  robject.define(Rfunc.new('require', rnil, [rstring]))
+  robject.define(Rfunc.new('puts', rnil, [rstring]))
+  robject.define(Rfunc.new('exit', rnil, [rinteger]))
 
   rstring.define(Rfunc.new('upcase', rstring, []))
 
@@ -188,7 +189,7 @@ class Context
 
   def initialize(source)
     @robject = make_root()
-    @rvoid = @robject.lookup(:void)
+    @rnil = @robject.lookup(:nil)
     @rundefined = Rundefined.new
     @scope = [@robject]
     @callstack = [FnScope.new(@robject)]
@@ -243,10 +244,10 @@ class Context
 
   #: returns type
   def n_expr(node)
-    if node == nil
-      return
-    end
-    case node.type
+    case node&.type
+    when nil
+    when :nil
+      @rnil
     when :begin
       node.children.map { |child| n_expr(child) }.last
     when :def
@@ -279,7 +280,7 @@ class Context
       if type1 == type2
         type1
       else
-        raise "Sum types not yet supported"
+        raise "Sum types not yet supported (line #{node.loc.line})"
       end
     when :float
       type_lookup!(node, @robject, 'Float')
@@ -387,8 +388,8 @@ class Context
   # returns return type of method/function (or nil if not determined)
   def n_send(node)
     name = node.children[1].to_s
-    self_type = node.children[0] ? n_expr(node.children[0]) : @rvoid
-    if self_type != @rvoid
+    self_type = node.children[0] ? n_expr(node.children[0]) : @rnil
+    if self_type != @rnil
       if self_type.kind_of?(Rundefined)
         return self_type
       else
@@ -440,7 +441,7 @@ class Context
       return [fn.return_type, [function_call_type_error(node, fn, args)]]
     end
 
-    if fn.body && fn.return_type == @rundefined
+    if fn.return_type == @rundefined
       function_scope = FnScope.new(scope_top)
       # define lvars from arguments
       fn.arg_name_type.each { |a| function_scope.define(Rlvar.new(a[0], a[1])) }
