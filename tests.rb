@@ -160,4 +160,25 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
   end
+
+  def test_function_type_inference
+    assert_equal(
+      [[8, :var_type, 'a', 'Float', 'Integer'],
+       [9, :fn_arg_type, 'thing', 'Float,Integer', 'Integer,Float']],
+      parse_str(
+        <<-RUBY
+          def thing(x, y)
+            x * y.to_f
+          end
+          def other_thing(z)
+            thing(z, 3) * z
+          end
+          a = thing(1.0, 2)
+          a = 3
+          b = thing(1, 2.0)
+          a = other_thing(3.0)
+        RUBY
+      )
+    )
+  end
 end

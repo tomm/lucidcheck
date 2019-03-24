@@ -3,6 +3,32 @@ require 'parser/current'
 require 'pry'
 require 'set'
 
+# type annotation formats that could be parsed with ruby parser:
+# String | Integer
+# fn(Integer,String) > String
+# fn(fn() > String)
+# Array[Integer]
+# [Integer, String, Boolean]
+# fn[T].(T,T) > T
+# fn[T,U].(fn(T) > U, Array[T]) > Array[U]
+
+class FnScope
+  #: fn(Rmetaclass | Rclass)
+  def initialize(in_class)
+    @in_class = in_class
+    @local_scope = {}
+  end
+
+  def lookup(name)
+    o = @local_scope[name]
+    if o then o else @in_class.lookup(name) end
+  end
+
+  def define(rscopebinding)
+    @local_scope[rscopebinding.name] = rscopebinding
+  end
+end
+
 class Rthing
   attr_reader :name, :type
   def initialize(name, type)
@@ -31,46 +57,34 @@ class Rconst < Rthing
 end
 
 class Rfunc < Rthing
-  def initialize(name, return_type, arg_types)
+  attr_accessor :body, :arg_name_type
+
+  #: fn(String, Rthing, Array[Rthing])
+  def initialize(name, return_type, anon_args = [])
     super(name, return_type)
-    @arg_types = arg_types
+    # [ [name, type], ... ]
+    @arg_name_type = anon_args.map { |a| [nil, a] }
+    @body = nil
   end
 
-  # @returns [return_type, errors]
-  # updates @arg_types with param types if nil
-  def called_by!(node, args)
-    args.each_with_index {|a,i|
-      if a == nil
-        return [@type, [type_error(node, args)]]
-      end
-    }
-    if args.length != @arg_types.length
-      return [@type, [[node, :fn_arg_num, @name, @arg_types.length-1, args.length-1]]]
-    end
-
-    # collect arg types if we know none
-    if @arg_types == [nil]*@arg_types.length
-      @arg_types = args
-    end
-
-    # check arg types. ignore first argument, since we have already resolved class lookup
-    if @arg_types.drop(1) != args.drop(1)
-      return [@type, [type_error(node, args)]]
-    end
-
-    [@type, []]
+  # named as in def my_func(x, y, z). ie not keyword args
+  #: fn(Array[[String, Rthing]])
+  def set_named_args(arg_name_type)
+    @arg_name_type = arg_name_type
   end
 
-  private
+  def return_type=(type)
+    @type = type
+  end
 
-  def type_error(node, args)
-    [node, :fn_arg_type, @name, @arg_types.drop(1).join(','), args.drop(1).map(&:name).join(',')]
+  def return_type
+    @type
   end
 end
 
 class Rmetaclass < Rthing
   def initialize(parent_name)
-    super("#{parent_name}::Class", nil)
+    super("#{parent_name}:Class", nil)
     @rmethods = {}
   end
 
@@ -112,28 +126,29 @@ def make_root
   robject = Rclass.new('Object', nil)
   # denny is right
   rstring  = robject.define(Rclass.new('String', robject))
+  rsymbol  = robject.define(Rclass.new('Symbol', robject))
   rvoid    = robject.define(Rclass.new(:void, robject))
   rinteger = robject.define(Rclass.new('Integer', robject))
   rfloat   = robject.define(Rclass.new('Float', robject))
   rboolean = robject.define(Rclass.new('Boolean', robject))
   
-  robject.define(Rfunc.new('require', rvoid, [rvoid, rstring]))
-  robject.define(Rfunc.new('puts', rvoid, [rvoid, rstring]))
-  robject.define(Rfunc.new('exit', rvoid, [rvoid, rinteger]))
+  robject.define(Rfunc.new('require', rvoid, [rstring]))
+  robject.define(Rfunc.new('puts', rvoid, [rstring]))
+  robject.define(Rfunc.new('exit', rvoid, [rinteger]))
 
-  rstring.define(Rfunc.new('upcase', rstring, [rstring]))
+  rstring.define(Rfunc.new('upcase', rstring, []))
 
-  rinteger.define(Rfunc.new('+', rinteger, [rvoid, rinteger]))
-  rinteger.define(Rfunc.new('-', rinteger, [rvoid, rinteger]))
-  rinteger.define(Rfunc.new('*', rinteger, [rvoid, rinteger]))
-  rinteger.define(Rfunc.new('/', rinteger, [rvoid, rinteger]))
-  rinteger.define(Rfunc.new('to_f', rfloat, [rinteger]))
+  rinteger.define(Rfunc.new('+', rinteger, [rinteger]))
+  rinteger.define(Rfunc.new('-', rinteger, [rinteger]))
+  rinteger.define(Rfunc.new('*', rinteger, [rinteger]))
+  rinteger.define(Rfunc.new('/', rinteger, [rinteger]))
+  rinteger.define(Rfunc.new('to_f', rfloat, []))
 
-  rfloat.define(Rfunc.new('+', rfloat, [rvoid, rfloat]))
-  rfloat.define(Rfunc.new('-', rfloat, [rvoid, rfloat]))
-  rfloat.define(Rfunc.new('*', rfloat, [rvoid, rfloat]))
-  rfloat.define(Rfunc.new('/', rfloat, [rvoid, rfloat]))
-  rfloat.define(Rfunc.new('to_i', rinteger, [rfloat]))
+  rfloat.define(Rfunc.new('+', rfloat, [rfloat]))
+  rfloat.define(Rfunc.new('-', rfloat, [rfloat]))
+  rfloat.define(Rfunc.new('*', rfloat, [rfloat]))
+  rfloat.define(Rfunc.new('/', rfloat, [rfloat]))
+  rfloat.define(Rfunc.new('to_i', rinteger, []))
 
   robject
 end
@@ -148,6 +163,8 @@ class Context
         "Type '#{e[3]}' has no method named '#{e[2]}'"
       when :const_unknown
         "Constant '#{e[2]}' not found in this scope"
+      when :lvar_unknown
+        "Local variable '#{e[2]}' not found in this scope"
       when :fn_arg_num
         "Function '#{e[2]}' expected #{e[3]} arguments but found #{e[4]}"
       when :fn_arg_type
@@ -168,6 +185,7 @@ class Context
     @rvoid = @robject.lookup(:void)
     @rundefined = Rundefined.new
     @scope = [@robject]
+    @callstack = [FnScope.new(@robject)]
     @errors = []
     @ast = Parser::CurrentRuby.parse(source)
   end
@@ -182,6 +200,19 @@ class Context
 
   def scope_top
     @scope.last
+  end
+
+  def callstack_top
+    @callstack.last
+  end
+
+  def pop_callstack
+    @callstack.pop
+  end
+
+  #: fn(FnScope)
+  def push_callstack(fnscope)
+    @callstack.push(fnscope)
   end
 
   def check
@@ -204,7 +235,13 @@ class Context
     when :defs # define static method
       n_defs(node)
     when :lvar
-      scope_top.lookup(node.children[0].to_s).type
+      lvar = callstack_top.lookup(node.children[0].to_s)
+      if lvar == nil
+        @errors << [node, :lvar_unknown, node.children[0].to_s]
+        @rundefined
+      else
+        lvar.type
+      end
     when :send
       n_send(node)
     when :ivasgn
@@ -237,6 +274,8 @@ class Context
       type_lookup!(node, @robject, 'Boolean')
     when :false
       type_lookup!(node, @robject, 'Boolean')
+    when :sym
+      type_lookup!(node, @robject, 'Symbol')
     when :const
       c = scope_top.lookup(node.children[1].to_s)
       if c
@@ -246,7 +285,7 @@ class Context
         @rundefined
       end
     else
-      raise "Unexpected #{node}"
+      raise "Unexpected #{node} at line #{node.loc.line}"
     end
   end
 
@@ -266,7 +305,7 @@ class Context
 
     # define a 'new' static method if 'initialize' was not defined
     if scope_top.metaclass.lookup('new') == nil
-      scope_top.metaclass.define(Rfunc.new('new', scope_top, [nil]))
+      scope_top.metaclass.define(Rfunc.new('new', scope_top))
     end
 
     pop_scope()
@@ -296,6 +335,7 @@ class Context
 
   # assign instance variable
   def n_ivasgn(node)
+    raise "n_ivasgn not implemented at line #{node.loc.line}"
     binding.pry
   end
 
@@ -303,12 +343,12 @@ class Context
     name = node.children[0].to_s
     type = n_expr(node.children[1])
 
-    if type == nil
+    if type == @rundefined
       # error already reported. do nothing
-    elsif scope_top.lookup(name) == nil
-      scope_top.define(Rlvar.new(name, type))
-    elsif scope_top.lookup(name).type != type
-      @errors << [node, :var_type, name, scope_top.lookup(name).type.name, type.name]
+    elsif callstack_top.lookup(name) == nil
+      callstack_top.define(Rlvar.new(name, type))
+    elsif callstack_top.lookup(name).type != type
+      @errors << [node, :var_type, name, callstack_top.lookup(name).type.name, type.name]
     end
   end
 
@@ -339,15 +379,14 @@ class Context
       scope = scope_top
     end
     name = node.children[1].to_s
-    # consider 'self' to be a normal param
-    arg_types = [self_type] + node.children[2..-1].map {|n| n_expr(n) }
+    arg_types = node.children[2..-1].map {|n| n_expr(n) }
     num_args = arg_types.length
 
     if scope.lookup(name) == nil
       @errors << [node, :fn_unknown, name, scope.name]
       return @rundefined
     elsif scope.lookup(name).kind_of?(Rfunc)
-      return_type, errors = scope.lookup(name).called_by!(node, arg_types)
+      return_type, errors = function_call(scope.lookup(name), node, arg_types)
       @errors = @errors + errors
       if return_type == nil and !errors.empty?
         return @rundefined
@@ -360,6 +399,46 @@ class Context
     end
   end
 
+  # @returns [return_type, errors]
+  # updates @arg_name_type with param types if nil
+  def function_call(fn, node, args)
+    args.each_with_index {|a,i|
+      if a == nil
+        return [fn.return_type, [function_call_type_error(node, fn, args)]]
+      end
+    }
+    if args.length != fn.arg_name_type.length
+      return [fn.return_type, [[node, :fn_arg_num, fn.name, fn.arg_name_type.length, args.length]]]
+    end
+
+    # collect arg types if we know none
+    if fn.arg_name_type.map{ |a| a[1] == nil }.any?
+      args.each_with_index { |a, i| fn.arg_name_type[i][1] = a }
+    end
+
+    # check arg types. ignore first argument, since we have already resolved class lookup
+    if fn.arg_name_type.map {|a| a[1]} != args
+      return [fn.return_type, [function_call_type_error(node, fn, args)]]
+    end
+
+    if fn.body && fn.return_type == @rundefined
+      function_scope = FnScope.new(scope_top)
+      # define lvars from arguments
+      fn.arg_name_type.each { |a| function_scope.define(Rlvar.new(a[0], a[1])) }
+
+      # find function return type by evaluating body with concrete argument types in scope
+      push_callstack(function_scope)
+      fn.return_type = n_expr(fn.body)
+      pop_callstack()
+    end
+
+    [fn.return_type, []]
+  end
+
+  def function_call_type_error(node, fn, args)
+    [node, :fn_arg_type, fn.name, fn.arg_name_type.map{|a|a[1]}.join(','), args.map(&:name).join(',')]
+  end
+
   # define static method
   def n_defs(node)
     if node.children[0].type != :self
@@ -367,32 +446,29 @@ class Context
     end
     name = node.children[1].to_s
     num_args = node.children[2].children.length
-    if node.children[3] == nil
-      return_type = @rvoid
-    else
-      return_type = n_expr(node.children[3])
-    end
-    scope_top.metaclass.define(Rfunc.new(name, return_type, [nil]*(num_args+1)))
+    # don't know types of arguments or return type yet
+    fn = Rfunc.new(name, @rundefined, [nil]*(num_args))
+    fn.body = node.children[3]
+    scope_top.metaclass.define(fn)
   end
 
   def n_def(node)
     name = node.children[0].to_s
-    num_args = node.children[1].children.length
+    # [ [name, type], ... ]
+    arg_name_type = node.children[1].to_a.map{|x| [x.children[0].to_s, nil] }
     # define function with no known argument types (so far)
     if name == 'initialize'
-      if node.children[2] != nil
-        # evaluate just to walk body.
-        n_expr(node.children[2])
-      end
       # assume return type for 'new' method
-      scope_top.metaclass.define(Rfunc.new('new', scope_top, [nil]*(num_args+1)))
+      fn = Rfunc.new('new', scope_top)
+      fn.set_named_args(arg_name_type)
+      fn.body = node.children[2]
+      scope_top.metaclass.define(fn)
     else
-      if node.children[2] == nil
-        return_type = @rvoid
-      else
-        return_type = n_expr(node.children[2])
-      end
-      scope_top.define(Rfunc.new(name, return_type, [nil]*(num_args+1)))
+      # don't know types of arguments or return type yet
+      fn = Rfunc.new(name, @rundefined)
+      fn.set_named_args(arg_name_type)
+      fn.body = node.children[2]
+      scope_top.define(fn)
     end
   end
 end
