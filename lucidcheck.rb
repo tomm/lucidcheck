@@ -57,14 +57,18 @@ class Rconst < Rthing
 end
 
 class Rfunc < Rthing
-  attr_accessor :body, :arg_name_type
+  attr_accessor :node, :body, :arg_name_type
 
   #: fn(String, Rthing, Array[Rthing])
   def initialize(name, return_type, anon_args = [])
     super(name, return_type)
     # [ [name, type], ... ]
     @arg_name_type = anon_args.map { |a| [nil, a] }
-    @body = nil
+    @node = nil
+  end
+
+  def type_unknown?
+    @arg_name_type.map{ |a| a[1] == nil }.any? || @type.kind_of?(Rundefined)
   end
 
   # named as in def my_func(x, y, z). ie not keyword args
@@ -85,29 +89,29 @@ end
 class Rmetaclass < Rthing
   def initialize(parent_name)
     super("#{parent_name}:Class", nil)
-    @rmethods = {}
+    @namespace = {}
   end
 
   def lookup(method_name)
-    @rmethods[method_name]
+    @namespace[method_name]
   end
 
   def define(rscopebinding)
-    @rmethods[rscopebinding.name] = rscopebinding
+    @namespace[rscopebinding.name] = rscopebinding
   end
 end
 
 class Rclass < Rthing
-  attr_reader :metaclass
+  attr_reader :metaclass, :namespace
   def initialize(name, parent_class)
     @metaclass = Rmetaclass.new(name)
     super(name, @metaclass)
     @parent = parent_class
-    @rmethods = {}
+    @namespace = {}
   end
 
   def lookup(method_name)
-    m = @rmethods[method_name]
+    m = @namespace[method_name]
     if m
       m
     elsif @parent
@@ -118,7 +122,7 @@ class Rclass < Rthing
   end
 
   def define(rscopebinding)
-    @rmethods[rscopebinding.name] = rscopebinding
+    @namespace[rscopebinding.name] = rscopebinding
   end
 end
 
@@ -155,7 +159,7 @@ end
 
 class Context
   def self.error_msg(filename, e)
-    "Error in #{filename} line #{e[0].loc.line}: " +
+    "Error in #{filename} line #{e[0]&.loc&.line}: " +
       case e[1]
       when :type_unknown
         "Type '#{e[2]}' not found in this scope"
@@ -165,6 +169,8 @@ class Context
         "Constant '#{e[2]}' not found in this scope"
       when :lvar_unknown
         "Local variable '#{e[2]}' not found in this scope"
+      when :fn_inference_fail
+        "Could not infer type of function #{e[2]}. Add a type annotation (not yet supported ;)"
       when :fn_arg_num
         "Function '#{e[2]}' expected #{e[3]} arguments but found #{e[4]}"
       when :fn_arg_type
@@ -215,8 +221,21 @@ class Context
     @callstack.push(fnscope)
   end
 
+  def check_function_type_inference_succeeded(scope)
+    scope.namespace.each_value { |thing|
+      if thing.kind_of?(Rfunc)
+        if thing.type_unknown?
+          @errors << [thing.node, :fn_inference_fail, thing.name]
+        end
+      elsif thing.kind_of?(Rclass)
+        check_function_type_inference_succeeded(thing)
+      end
+    }
+  end
+
   def check
     n_expr(@ast)
+    check_function_type_inference_succeeded(@robject)
     @errors
   end
 
@@ -412,7 +431,7 @@ class Context
     end
 
     # collect arg types if we know none
-    if fn.arg_name_type.map{ |a| a[1] == nil }.any?
+    if fn.type_unknown?
       args.each_with_index { |a, i| fn.arg_name_type[i][1] = a }
     end
 
@@ -448,6 +467,7 @@ class Context
     num_args = node.children[2].children.length
     # don't know types of arguments or return type yet
     fn = Rfunc.new(name, @rundefined, [nil]*(num_args))
+    fn.node = node
     fn.body = node.children[3]
     scope_top.metaclass.define(fn)
   end
@@ -461,12 +481,14 @@ class Context
       # assume return type for 'new' method
       fn = Rfunc.new('new', scope_top)
       fn.set_named_args(arg_name_type)
+      fn.node = node
       fn.body = node.children[2]
       scope_top.metaclass.define(fn)
     else
       # don't know types of arguments or return type yet
       fn = Rfunc.new(name, @rundefined)
       fn.set_named_args(arg_name_type)
+      fn.node = node
       fn.body = node.children[2]
       scope_top.define(fn)
     end

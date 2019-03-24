@@ -164,7 +164,8 @@ class TestLucidCheck < Test::Unit::TestCase
   def test_function_type_inference
     assert_equal(
       [[8, :var_type, 'a', 'Float', 'Integer'],
-       [9, :fn_arg_type, 'thing', 'Float,Integer', 'Integer,Float']],
+       [9, :fn_arg_type, 'thing', 'Float,Integer', 'Integer,Float'],
+       [12, :fn_inference_fail, 'never_called']],
       parse_str(
         <<-RUBY
           def thing(x, y)
@@ -177,6 +178,32 @@ class TestLucidCheck < Test::Unit::TestCase
           a = 3
           b = thing(1, 2.0)
           a = other_thing(3.0)
+
+          def never_called(u, v)
+            u + v
+          end
+        RUBY
+      )
+    )
+  end
+
+  def test_method_type_inference2
+    assert_equal(
+      [[11, :var_type, 'u', 'String', 'Integer'],
+       [5, :fn_inference_fail, 'never_called']],
+      parse_str(
+        <<-RUBY
+          class A
+            def gets_called(x)
+              x
+            end
+            def never_called(y)
+              y
+            end
+          end
+          a = A.new
+          u = a.gets_called('hi')
+          u = 12
         RUBY
       )
     )
