@@ -128,6 +128,7 @@ class Rclass < Rthing
 end
 
 class Rsumtype < Rthing
+  attr_reader :options
   #: fn(Array[Rthing])
   def initialize(types)
     super(types.map(&:to_s).join(' | '), nil)
@@ -135,7 +136,11 @@ class Rsumtype < Rthing
   end
 
   def ==(other)
-    @options.map { |o| o == other }.any?
+    if other.is_a?(Rsumtype)
+      @options == other.options
+    else
+      @options.map { |o| o == other }.any?
+    end
   end
 end
 
