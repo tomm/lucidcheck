@@ -500,12 +500,14 @@ class Context
   # define static method
   def n_defs(node)
     if node.children[0].type != :self
-      raise "Expected self at #{node}"
+      raise "Checker bug. Expected self at #{node}"
     end
     name = node.children[1].to_s
-    num_args = node.children[2].children.length
+    # [ [name, type], ... ]
+    arg_name_type = node.children[2].to_a.map{|x| [x.children[0].to_s, nil] }
     # don't know types of arguments or return type yet
-    fn = Rfunc.new(name, @rundefined, [nil]*(num_args))
+    fn = Rfunc.new(name, @rundefined)
+    fn.set_named_args(arg_name_type)
     fn.node = node
     fn.body = node.children[3]
     scope_top.metaclass.define(fn)

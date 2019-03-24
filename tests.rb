@@ -107,9 +107,9 @@ class TestLucidCheck < Test::Unit::TestCase
 
   def test_class
     assert_equal(
-      [[23, :fn_unknown, 'wrong', 'B'],
-       [24, :var_type, 'b', 'B', 'Integer'],
-       [28, :fn_unknown, 'oi', 'A']],
+      [[24, :fn_unknown, 'wrong', 'B'],
+       [25, :var_type, 'b', 'B', 'Integer'],
+       [29, :fn_unknown, 'oi', 'A']],
       parse_str(
         <<-RUBY
           class A
@@ -127,6 +127,7 @@ class TestLucidCheck < Test::Unit::TestCase
             end
 
             def self.foo(x, y)
+              x + y
             end
           end
 
