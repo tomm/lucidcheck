@@ -3,7 +3,7 @@ require './lucidcheck'
 require 'test/unit'
 
 def node_to_line_nums(errors)
-  errors.map { |es| [[es[0].loc.line], es[1..-1]].flatten }
+  errors.map { |es| [[es[0]&.loc&.line], es[1..-1]].flatten }
 end
 
 def parse_str(str)
@@ -204,6 +204,45 @@ class TestLucidCheck < Test::Unit::TestCase
           a = A.new
           u = a.gets_called('hi')
           u = 12
+        RUBY
+      )
+    )
+  end
+
+  def test_catch_parse_error
+    assert_equal(
+      [[nil, :parse_error, 'unexpected token $end']],
+      parse_str(
+        <<-RUBY
+          if true then
+        RUBY
+      )
+    )
+  end
+
+  def test_if_statement
+    assert_equal(
+      [[4, :if_not_boolean, 'Integer']],
+      parse_str(
+        <<-RUBY
+          x = 2
+          y = 3
+          z = if x > y then 1 else 0 end
+          z = if x then 1 else 0 end
+        RUBY
+      )
+    )
+  end
+
+  def test_sum_types
+    assert_equal(
+      [[4, :var_type, 'x', 'String | nil', 'Float']],
+      parse_str(
+        <<-RUBY
+          x = if rand() > 0.5 then 'hi' else nil end
+          x = 'balls'
+          x = nil
+          x = 1.2
         RUBY
       )
     )

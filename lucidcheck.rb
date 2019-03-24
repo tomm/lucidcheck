@@ -127,6 +127,18 @@ class Rclass < Rthing
   end
 end
 
+class Rsumtype < Rthing
+  #: fn(Array[Rthing])
+  def initialize(types)
+    super(types.map(&:to_s).join(' | '), nil)
+    @options = types
+  end
+
+  def ==(other)
+    @options.map { |o| o == other }.any?
+  end
+end
+
 def make_root
   robject = Rclass.new('Object', nil)
   # denny is right
@@ -140,6 +152,7 @@ def make_root
   robject.define(Rfunc.new('require', rnil, [rstring]))
   robject.define(Rfunc.new('puts', rnil, [rstring]))
   robject.define(Rfunc.new('exit', rnil, [rinteger]))
+  robject.define(Rfunc.new('rand', rfloat, []))
 
   rstring.define(Rfunc.new('upcase', rstring, []))
 
@@ -148,11 +161,19 @@ def make_root
   rinteger.define(Rfunc.new('*', rinteger, [rinteger]))
   rinteger.define(Rfunc.new('/', rinteger, [rinteger]))
   rinteger.define(Rfunc.new('to_f', rfloat, []))
+  rinteger.define(Rfunc.new('>', rboolean, [rinteger]))
+  rinteger.define(Rfunc.new('>=', rboolean, [rinteger]))
+  rinteger.define(Rfunc.new('<', rboolean, [rinteger]))
+  rinteger.define(Rfunc.new('<=', rboolean, [rinteger]))
 
   rfloat.define(Rfunc.new('+', rfloat, [rfloat]))
   rfloat.define(Rfunc.new('-', rfloat, [rfloat]))
   rfloat.define(Rfunc.new('*', rfloat, [rfloat]))
   rfloat.define(Rfunc.new('/', rfloat, [rfloat]))
+  rfloat.define(Rfunc.new('>', rboolean, [rfloat]))
+  rfloat.define(Rfunc.new('>=', rboolean, [rfloat]))
+  rfloat.define(Rfunc.new('<', rboolean, [rfloat]))
+  rfloat.define(Rfunc.new('<=', rboolean, [rfloat]))
   rfloat.define(Rfunc.new('to_i', rinteger, []))
 
   robject
@@ -182,6 +203,8 @@ class Context
         "Cannot infer type. Annotation needed."
       when :const_redef
         "Cannot redefine constant '#{e[2]}'"
+      when :parse_error
+        "Parse error: #{e[2]}"
       else
         e.to_s
       end
@@ -190,11 +213,37 @@ class Context
   def initialize(source)
     @robject = make_root()
     @rnil = @robject.lookup(:nil)
+    @rboolean = @robject.lookup('Boolean')
     @rundefined = Rundefined.new
     @scope = [@robject]
     @callstack = [FnScope.new(@robject)]
     @errors = []
-    @ast = Parser::CurrentRuby.parse(source)
+    begin
+      @ast = Parser::CurrentRuby.parse(source)
+    rescue StandardError => e
+      # XXX todo - get line number
+      @errors << [nil, :parse_error, e.to_s]
+    end
+  end
+
+  def check
+    if @ast then n_expr(@ast) end
+    check_function_type_inference_succeeded(@robject)
+    @errors
+  end
+
+  private
+
+  def check_function_type_inference_succeeded(scope)
+    scope.namespace.each_value { |thing|
+      if thing.kind_of?(Rfunc)
+        if thing.type_unknown?
+          @errors << [thing.node, :fn_inference_fail, thing.name]
+        end
+      elsif thing.kind_of?(Rclass)
+        check_function_type_inference_succeeded(thing)
+      end
+    }
   end
 
   def push_scope(scope)
@@ -221,26 +270,6 @@ class Context
   def push_callstack(fnscope)
     @callstack.push(fnscope)
   end
-
-  def check_function_type_inference_succeeded(scope)
-    scope.namespace.each_value { |thing|
-      if thing.kind_of?(Rfunc)
-        if thing.type_unknown?
-          @errors << [thing.node, :fn_inference_fail, thing.name]
-        end
-      elsif thing.kind_of?(Rclass)
-        check_function_type_inference_succeeded(thing)
-      end
-    }
-  end
-
-  def check
-    n_expr(@ast)
-    check_function_type_inference_succeeded(@robject)
-    @errors
-  end
-
-  private
 
   #: returns type
   def n_expr(node)
@@ -275,12 +304,17 @@ class Context
     when :module
       # ignore for now :)
     when :if
+      cond = n_expr(node.children[0])
       type1 = n_expr(node.children[1])
       type2 = n_expr(node.children[2])
+
+      if cond != @rboolean
+        @errors << [node, :if_not_boolean, cond.name]
+      end
       if type1 == type2
         type1
       else
-        raise "Sum types not yet supported (line #{node.loc.line})"
+        Rsumtype.new([type1, type2])
       end
     when :float
       type_lookup!(node, @robject, 'Float')
@@ -356,7 +390,6 @@ class Context
   # assign instance variable
   def n_ivasgn(node)
     raise "n_ivasgn not implemented at line #{node.loc.line}"
-    binding.pry
   end
 
   def n_lvasgn(node)
