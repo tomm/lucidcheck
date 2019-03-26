@@ -16,14 +16,17 @@ class CheckerBug < RuntimeError
 end
 
 class FnScope
-  #: fn(Rmetaclass | Rclass)
-  def initialize(in_class)
+  attr_reader :passed_block
+  #: fn(Rmetaclass | Rclass, Rblock | nil)
+  def initialize(in_class, parent_scope, passed_block)
     @in_class = in_class
     @local_scope = {}
+    @parent_scope = parent_scope
+    @passed_block = passed_block
   end
 
   def lookup(name)
-    o = @local_scope[name]
+    o = @local_scope[name] || @parent_scope&.lookup(name)
     if o then o else @in_class.lookup(name) end
   end
 
@@ -55,10 +58,16 @@ class FnSig
     @args.map{ |a| a[1] == nil }.any? || @return_type.kind_of?(Rundefined)
   end
 
+  #: fn(FnSig)
+  def structural_eql?(other_sig)
+    (@return_type == other_sig.return_type) && (other_sig.args.map{|v|v[1]} == @args.map{|v|v[1]})
+  end
+
   #: fn(Array[Rbindable]) > Array[error]
-  def call_typecheck?(node, fn_name, passed_args)
+  def call_typecheck?(node, fn_name, passed_args, block)
     if passed_args.map { |a| a == nil }.any?
-      return [function_call_type_error(node, fn, args)]
+      raise CheckerBug.new("Passed nil arg to method #{fn_name}. weird. args: #{passed_args}")
+      #return [[node, :fn_inference_fail, fn_name]]
     end
 
     if passed_args.length != @args.length
@@ -78,15 +87,24 @@ class FnSig
     end
   end
 
+  def args_to_s
+    @args.map { |a| a[1]&.name || '?' }.join(',')
+  end
+
+  def to_s
+    "(#{args_to_s}) > #{@return_type&.name || '?'}"
+  end
+
   private
 
   #: fn() > Array[error]
   def function_call_type_error(node, fn_name, passed_args)
-    [node, :fn_arg_type, fn_name, @args.map{|a|a[1]}.join(','), passed_args.map(&:name).join(',')]
+    [node, :fn_arg_type, fn_name, args_to_s, passed_args.map(&:name).join(',')]
   end
 end
 
 class Rblock
+  attr_reader :sig, :body_node
   # fn(Array[String], node)
   def initialize(arg_names, body_node)
     @sig = FnSig.new
@@ -125,7 +143,7 @@ class Rconst < Rbindable
 end
 
 class Rfunc < Rbindable
-  attr_accessor :node, :body, :sig
+  attr_accessor :node, :body, :sig, :block_sig
 
   #: fn(String, Rbindable, Array[Rbindable])
   def initialize(name, return_type, anon_args = [])
@@ -133,6 +151,7 @@ class Rfunc < Rbindable
     @sig = FnSig.new
     @sig.add_anon_args(anon_args)
     @sig.return_type = return_type
+    @block_sig = nil
     @node = nil
   end
 
@@ -226,6 +245,7 @@ def make_root
   robject.define(Rfunc.new('puts', rnil, [rstring]))
   robject.define(Rfunc.new('exit', rnil, [rinteger]))
   robject.define(Rfunc.new('rand', rfloat, []))
+  robject.define(Rfunc.new('to_s', rstring, []))
 
   rstring.define(Rfunc.new('upcase', rstring, []))
 
@@ -265,11 +285,15 @@ class Context
       when :lvar_unknown
         "Local variable '#{e[2]}' not found in this scope"
       when :fn_inference_fail
-        "Could not infer type of function #{e[2]}. Add a type annotation (not yet supported ;)"
+        "Could not infer type of function '#{e[2]}'. Add a type annotation (not yet supported ;)"
       when :fn_arg_num
         "Function '#{e[2]}' expected #{e[3]} arguments but found #{e[4]}"
       when :fn_arg_type
-        "Function '#{e[2]}' arguments have inferred type (#{e[3]}) but was passed (#{e[4]})"
+        "Function '#{e[2]}' arguments have inferred type (#{e[3]}) but is passed (#{e[4]})"
+      when :block_arg_type
+        "Function '#{e[2]}' takes a block of type '#{e[3]}' but is passed '#{e[4]}'"
+      when :block_arg_num
+        "Function '#{e[2]}' expected a block with #{e[3]} arguments, but passed block with #{e[4]} arguments"
       when :var_type
         "Cannot reassign variable '#{e[2]}' of type #{e[3]} with value of type #{e[4]}"
       when :inference_failed
@@ -289,7 +313,7 @@ class Context
     @rboolean = @robject.lookup('Boolean')
     @rundefined = Rundefined.new
     @scope = [@robject]
-    @callstack = [FnScope.new(@robject)]
+    @callstack = [FnScope.new(@robject, nil, nil)]
     @errors = []
     begin
       @ast = Parser::CurrentRuby.parse(source)
@@ -405,6 +429,8 @@ class Context
       type_lookup!(node, @robject, 'Boolean')
     when :sym
       type_lookup!(node, @robject, 'Symbol')
+    when :yield
+      n_yield(node)
     when :const
       c = scope_top.lookup(node.children[1].to_s)
       if c
@@ -416,6 +442,28 @@ class Context
     else
       raise "Unexpected #{node} at line #{node.loc.line}"
     end
+  end
+
+  def n_yield(node)
+    args = node.children.map {|n| n_expr(n) }
+    block = callstack_top.passed_block
+    type_errors = block.sig.call_typecheck?(node, '<block>', args, nil)
+
+    if !type_errors.empty?
+      @errors.concat(type_errors)
+      return @rundefined
+    end
+
+    function_scope = FnScope.new(scope_top, callstack_top, nil)
+    # define lvars from arguments
+    block.sig.args.each { |a| function_scope.define(Rlvar.new(a[0], a[1])) }
+
+    # find block return type by evaluating body with concrete argument types in scope
+    push_callstack(function_scope)
+    block.sig.return_type = n_expr(block.body_node)
+    pop_callstack()
+
+    block.sig.return_type
   end
 
   def n_class(node)
@@ -494,13 +542,13 @@ class Context
   end
 
   def n_block(node)
-    send = node.children[1]
-    block_args = node.children[2]
-    block_body = node.children[3]
+    send_node = node.children[0]
+    block_arg_names = node.children[1].children.to_a.map { |v| v.children[0].to_s }
+    block_body = node.children[2]
 
-    raise CheckerBug.new('expected :send in :block') unless send.type == :send
+    raise CheckerBug.new("expected :send, found #{send_node.type} in :block") unless send_node.type == :send
 
-    #n_send(
+    n_send(send_node, block = Rblock.new(block_arg_names, block_body))
   end
 
   # returns return type of method/function (or nil if not determined)
@@ -516,6 +564,7 @@ class Context
     else
       scope = scope_top
     end
+    raise CheckerBug, 'invalid nil scope' if scope.nil?
     name = node.children[1].to_s
     arg_types = node.children[2..-1].map {|n| n_expr(n) }
     num_args = arg_types.length
@@ -524,7 +573,7 @@ class Context
       @errors << [node, :fn_unknown, name, scope.name]
       return @rundefined
     elsif scope.lookup(name).kind_of?(Rfunc)
-      return_type, errors = function_call(scope.lookup(name), node, arg_types)
+      return_type, errors = function_call(scope, scope.lookup(name), node, arg_types, block)
       @errors = @errors + errors
       if return_type == nil and !errors.empty?
         return @rundefined
@@ -539,15 +588,19 @@ class Context
 
   # @returns [return_type, errors]
   # updates @fn_sig with param types if nil
-  def function_call(fn, node, args)
-    type_errors = fn.sig.call_typecheck?(node, fn.name, args)
+  def function_call(scope, fn, node, args, block)
+    type_errors = fn.sig.call_typecheck?(node, fn.name, args, block)
 
     if !type_errors.empty?
       return [fn.return_type, type_errors]
     end
 
-    if fn.return_type == @rundefined
-      function_scope = FnScope.new(scope_top)
+    if fn.block_sig && block.sig.args.length != fn.block_sig.args.length
+      return [fn.return_type, [[node, :block_arg_num, fn.name, fn.block_sig.args.length, block.sig.args.length]]]
+    end
+
+    if fn.body != nil # means not a purely 'header' function def (ie ruby standard lib type stubs)
+      function_scope = FnScope.new(scope, callstack_top, block)
       # define lvars from arguments
       fn.sig.args.each { |a| function_scope.define(Rlvar.new(a[0], a[1])) }
 
@@ -555,6 +608,15 @@ class Context
       push_callstack(function_scope)
       fn.return_type = n_expr(fn.body)
       pop_callstack()
+
+      if block
+        if fn.block_sig && !fn.block_sig.structural_eql?(block.sig)
+          # block type mismatch
+          return [fn.return_type, [[node, :block_arg_type, fn.name, fn.block_sig.to_s, block.sig.to_s]]]
+        else
+          fn.block_sig = block.sig
+        end
+      end
     end
 
     [fn.return_type, []]

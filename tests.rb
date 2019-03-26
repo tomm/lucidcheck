@@ -248,4 +248,69 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
   end
+
+  def test_block_return_type
+    assert_equal(
+      [[6, :block_arg_type, 'squared', '() > Integer', '() > Float'],
+       [7, :fn_arg_type, '*', 'Integer', 'Float']],
+      parse_str(
+        <<-RUBY
+          def squared
+            yield * yield
+          end
+
+          a = squared { 2 }
+          b = squared { 2.0 }
+          a = a * 3.0
+        RUBY
+      )
+    )
+  end
+
+  def test_block_arg_num
+    assert_equal(
+      [[9, :block_arg_num, 'transform', 1, 2]],
+      parse_str(
+        <<-RUBY
+          def squared
+            yield * yield
+          end
+          def transform(x)
+            yield x
+          end
+          c = transform(2) { |x| squared { x } }
+          c = c * 3
+          d = transform(2) { |x,y| x }
+        RUBY
+      )
+    )
+  end
+
+  def test_block_scope
+    assert_equal(
+      [[9, :var_type, 'q', 'String', 'Float'],
+       [16, :fn_unknown, 'x', 'Object'],
+       [16, :fn_arg_type, "puts", "String", "undefined"]],
+      parse_str(
+        <<-RUBY
+          def noop
+            yield
+          end
+          q = 'hi'
+          z = noop {
+            x = 10
+            noop {
+              y = 20
+              q = 1.2
+              noop {
+                x * y
+              }
+            }
+          }
+          puts z.to_s
+          puts x.to_s
+        RUBY
+      )
+    )
+  end
 end
