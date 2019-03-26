@@ -12,6 +12,9 @@ require 'set'
 # fn[T].(T,T) > T
 # fn[T,U].(fn(T) > U, Array[T]) > Array[U]
 
+class CheckerBug < RuntimeError
+end
+
 class FnScope
   #: fn(Rmetaclass | Rclass)
   def initialize(in_class)
@@ -29,13 +32,77 @@ class FnScope
   end
 end
 
-class Rthing
+class FnSig
+  attr_accessor :args, :return_type
+
+  def initialize
+    @args = []
+    @return_type = nil
+  end
+
+  #: fn(Array[Rbindable])
+  def add_anon_args(args)
+    args.each { |a| @args << [nil, a] }
+  end
+
+  # named as in def my_func(x, y, z). ie not keyword args
+  #: fn(Array[[String, Rbindable]])
+  def add_named_args(args)
+    @args.concat(args)
+  end
+
+  def type_unknown?
+    @args.map{ |a| a[1] == nil }.any? || @return_type.kind_of?(Rundefined)
+  end
+
+  #: fn(Array[Rbindable]) > Array[error]
+  def call_typecheck?(node, fn_name, passed_args)
+    if passed_args.map { |a| a == nil }.any?
+      return [function_call_type_error(node, fn, args)]
+    end
+
+    if passed_args.length != @args.length
+      return [[node, :fn_arg_num, fn_name, @args.length, passed_args.length]]
+    end
+
+    # collect arg types if we know none
+    if type_unknown?
+      passed_args.each_with_index { |a, i| @args[i][1] = a }
+    end
+
+    # type check arguments
+    if @args.map {|a| a[1]} != passed_args
+      [function_call_type_error(node, fn_name, passed_args)]
+    else
+      []
+    end
+  end
+
+  private
+
+  #: fn() > Array[error]
+  def function_call_type_error(node, fn_name, passed_args)
+    [node, :fn_arg_type, fn_name, @args.map{|a|a[1]}.join(','), passed_args.map(&:name).join(',')]
+  end
+end
+
+class Rblock
+  # fn(Array[String], node)
+  def initialize(arg_names, body_node)
+    @sig = FnSig.new
+    @sig.add_named_args(arg_names.map { |name| [name, nil] })
+    @body_node = body_node
+  end
+end
+
+# Something you can assign to a variable
+class Rbindable
   attr_reader :name, :type
   def initialize(name, type)
     @name = name
     @type = type
-    if type && !type.kind_of?(Rthing)
-      raise "Weird type passed to Rthing.initialize: #{type} (#{type.class})"
+    if type && !type.kind_of?(Rbindable)
+      raise "Weird type passed to Rbindable.initialize: #{type} (#{type.class})"
     end
   end
 
@@ -45,49 +112,50 @@ class Rthing
 end
 
 # when type inference fails
-class Rundefined < Rthing
+class Rundefined < Rbindable
   def initialize
     super(:undefined, nil)
   end
 end
 
-class Rlvar < Rthing
+class Rlvar < Rbindable
 end
 
-class Rconst < Rthing
+class Rconst < Rbindable
 end
 
-class Rfunc < Rthing
-  attr_accessor :node, :body, :arg_name_type
+class Rfunc < Rbindable
+  attr_accessor :node, :body, :sig
 
-  #: fn(String, Rthing, Array[Rthing])
+  #: fn(String, Rbindable, Array[Rbindable])
   def initialize(name, return_type, anon_args = [])
-    super(name, return_type)
-    # [ [name, type], ... ]
-    @arg_name_type = anon_args.map { |a| [nil, a] }
+    super(name, nil)
+    @sig = FnSig.new
+    @sig.add_anon_args(anon_args)
+    @sig.return_type = return_type
     @node = nil
   end
 
   def type_unknown?
-    @arg_name_type.map{ |a| a[1] == nil }.any? || @type.kind_of?(Rundefined)
+    @sig.type_unknown?
   end
 
   # named as in def my_func(x, y, z). ie not keyword args
-  #: fn(Array[[String, Rthing]])
-  def set_named_args(arg_name_type)
-    @arg_name_type = arg_name_type
+  #: fn(Array[[String, Rbindable]])
+  def add_named_args(arg_name_type)
+    @sig.add_named_args(arg_name_type)
   end
 
   def return_type=(type)
-    @type = type
+    @sig.return_type = type
   end
 
   def return_type
-    @type
+    @sig.return_type
   end
 end
 
-class Rmetaclass < Rthing
+class Rmetaclass < Rbindable
   def initialize(parent_name)
     super("#{parent_name}:Class", nil)
     @namespace = {}
@@ -102,7 +170,7 @@ class Rmetaclass < Rthing
   end
 end
 
-class Rclass < Rthing
+class Rclass < Rbindable
   attr_reader :metaclass, :namespace
   def initialize(name, parent_class)
     @metaclass = Rmetaclass.new(name)
@@ -127,9 +195,9 @@ class Rclass < Rthing
   end
 end
 
-class Rsumtype < Rthing
+class Rsumtype < Rbindable
   attr_reader :options
-  #: fn(Array[Rthing])
+  #: fn(Array[Rbindable])
   def initialize(types)
     super(types.map(&:to_s).join(' | '), nil)
     @options = types
@@ -284,6 +352,8 @@ class Context
       @rnil
     when :begin
       node.children.map { |child| n_expr(child) }.last
+    when :block
+      n_block(node)
     when :def
       n_def(node)
     when :defs # define static method
@@ -423,8 +493,18 @@ class Context
     end
   end
 
+  def n_block(node)
+    send = node.children[1]
+    block_args = node.children[2]
+    block_body = node.children[3]
+
+    raise CheckerBug.new('expected :send in :block') unless send.type == :send
+
+    #n_send(
+  end
+
   # returns return type of method/function (or nil if not determined)
-  def n_send(node)
+  def n_send(node, block=nil)
     name = node.children[1].to_s
     self_type = node.children[0] ? n_expr(node.children[0]) : @rnil
     if self_type != @rnil
@@ -458,31 +538,18 @@ class Context
   end
 
   # @returns [return_type, errors]
-  # updates @arg_name_type with param types if nil
+  # updates @fn_sig with param types if nil
   def function_call(fn, node, args)
-    args.each_with_index {|a,i|
-      if a == nil
-        return [fn.return_type, [function_call_type_error(node, fn, args)]]
-      end
-    }
-    if args.length != fn.arg_name_type.length
-      return [fn.return_type, [[node, :fn_arg_num, fn.name, fn.arg_name_type.length, args.length]]]
-    end
+    type_errors = fn.sig.call_typecheck?(node, fn.name, args)
 
-    # collect arg types if we know none
-    if fn.type_unknown?
-      args.each_with_index { |a, i| fn.arg_name_type[i][1] = a }
-    end
-
-    # check arg types. ignore first argument, since we have already resolved class lookup
-    if fn.arg_name_type.map {|a| a[1]} != args
-      return [fn.return_type, [function_call_type_error(node, fn, args)]]
+    if !type_errors.empty?
+      return [fn.return_type, type_errors]
     end
 
     if fn.return_type == @rundefined
       function_scope = FnScope.new(scope_top)
       # define lvars from arguments
-      fn.arg_name_type.each { |a| function_scope.define(Rlvar.new(a[0], a[1])) }
+      fn.sig.args.each { |a| function_scope.define(Rlvar.new(a[0], a[1])) }
 
       # find function return type by evaluating body with concrete argument types in scope
       push_callstack(function_scope)
@@ -491,10 +558,6 @@ class Context
     end
 
     [fn.return_type, []]
-  end
-
-  def function_call_type_error(node, fn, args)
-    [node, :fn_arg_type, fn.name, fn.arg_name_type.map{|a|a[1]}.join(','), args.map(&:name).join(',')]
   end
 
   # define static method
@@ -507,7 +570,7 @@ class Context
     arg_name_type = node.children[2].to_a.map{|x| [x.children[0].to_s, nil] }
     # don't know types of arguments or return type yet
     fn = Rfunc.new(name, @rundefined)
-    fn.set_named_args(arg_name_type)
+    fn.add_named_args(arg_name_type)
     fn.node = node
     fn.body = node.children[3]
     scope_top.metaclass.define(fn)
@@ -521,14 +584,14 @@ class Context
     if name == 'initialize'
       # assume return type for 'new' method
       fn = Rfunc.new('new', scope_top)
-      fn.set_named_args(arg_name_type)
+      fn.add_named_args(arg_name_type)
       fn.node = node
       fn.body = node.children[2]
       scope_top.metaclass.define(fn)
     else
       # don't know types of arguments or return type yet
       fn = Rfunc.new(name, @rundefined)
-      fn.set_named_args(arg_name_type)
+      fn.add_named_args(arg_name_type)
       fn.node = node
       fn.body = node.children[2]
       scope_top.define(fn)
