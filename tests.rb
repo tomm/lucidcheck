@@ -313,4 +313,18 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
   end
+
+  def test_infer_empty_method_type
+    assert_equal(
+      [[4, :var_type, 'x', :nil, 'Integer']],
+      parse_str(
+        <<-RUBY
+          def doNothing
+          end
+          x = doNothing
+          x = 2
+        RUBY
+      )
+    )
+  end
 end

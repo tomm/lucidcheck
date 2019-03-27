@@ -1,5 +1,4 @@
 #!/usr/bin/env ruby
-require 'parser/current'
 require 'pry'
 require 'set'
 
@@ -241,6 +240,7 @@ def make_root
   rfloat   = robject.define(Rclass.new('Float', robject))
   rboolean = robject.define(Rclass.new('Boolean', robject))
   
+  robject.define(Rlvar.new('$0', rstring))
   robject.define(Rfunc.new('require', rnil, [rstring]))
   robject.define(Rfunc.new('puts', rnil, [rstring]))
   robject.define(Rfunc.new('exit', rnil, [rinteger]))
@@ -248,6 +248,7 @@ def make_root
   robject.define(Rfunc.new('to_s', rstring, []))
 
   rstring.define(Rfunc.new('upcase', rstring, []))
+  rstring.define(Rfunc.new('==', rboolean, [rstring]))
 
   rinteger.define(Rfunc.new('+', rinteger, [rinteger]))
   rinteger.define(Rfunc.new('-', rinteger, [rinteger]))
@@ -274,7 +275,7 @@ end
 
 class Context
   def self.error_msg(filename, e)
-    "Error in #{filename} line #{e[0]&.loc&.line}: " +
+    "#{filename}:#{e[0]&.loc&.line}:#{e[0]&.loc&.column + 1}: E: " +
       case e[1]
       when :type_unknown
         "Type '#{e[2]}' not found in this scope"
@@ -284,6 +285,10 @@ class Context
         "Constant '#{e[2]}' not found in this scope"
       when :lvar_unknown
         "Local variable '#{e[2]}' not found in this scope"
+      when :gvar_unknown
+        "Global variable '#{e[2]}' not found"
+      when :if_not_boolean
+        "if clause requires a boolean value, but #{e[2]} found"
       when :fn_inference_fail
         "Could not infer type of function '#{e[2]}'. Add a type annotation (not yet supported ;)"
       when :fn_arg_num
@@ -308,6 +313,11 @@ class Context
   end
 
   def initialize(source)
+    # '24' if RUBY_VERSION='2.4.4'
+    #ruby_version = RUBY_VERSION.split('.').take(2).join
+    #require "parser/ruby#{ruby_version}"
+    
+    require "parser/current"
     @robject = make_root()
     @rnil = @robject.lookup(:nil)
     @rboolean = @robject.lookup('Boolean')
@@ -382,6 +392,14 @@ class Context
       n_def(node)
     when :defs # define static method
       n_defs(node)
+    when :gvar
+      gvar = @robject.lookup(node.children[0].to_s)
+      if gvar == nil
+        @errors << [node, :gvar_unknown, node.children[0].to_s]
+        @rundefined
+      else
+        gvar.type
+      end
     when :lvar
       lvar = callstack_top.lookup(node.children[0].to_s)
       if lvar == nil
@@ -635,6 +653,7 @@ class Context
     fn.add_named_args(arg_name_type)
     fn.node = node
     fn.body = node.children[3]
+    if fn.body == nil then fn.return_type = @rnil end
     scope_top.metaclass.define(fn)
   end
 
@@ -656,6 +675,8 @@ class Context
       fn.add_named_args(arg_name_type)
       fn.node = node
       fn.body = node.children[2]
+      # can assume return type of nil if body is empty
+      if fn.body == nil then fn.return_type = @rnil end
       scope_top.define(fn)
     end
   end
@@ -664,6 +685,11 @@ end
 if __FILE__ == $0
   if ARGV.length < 1 then
     puts "Usage: ./turbocop.rb file1.rb file2.rb etc..."
+  end
+
+  if ARGV == ['--version']
+    puts "0.1.0"
+    exit 0
   end
 
   got_errors = false
