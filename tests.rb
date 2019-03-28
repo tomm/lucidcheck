@@ -327,4 +327,43 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
   end
+
+  def test_class_ivars_scope
+    assert_equal(
+      [[13, :var_type, '@x', 'String', 'Integer'],
+       [2, :ivar_unknown, '@x'],
+       [18, :ivar_assign_outside_constructor, '@y']],
+      parse_str(
+        <<-RUBY
+          def hello
+            @x
+            nil
+          end
+
+          def inblock
+            yield
+          end
+
+          class A
+            def initialize
+              @x = 'world'
+              @x = 2
+              hello
+            end
+
+            def poop
+              @y = 123
+              @x = 'sd'
+              inblock {
+                @x
+              }
+            end
+          end
+
+          a = A.new
+          a.poop
+        RUBY
+      )
+    )
+  end
 end

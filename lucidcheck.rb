@@ -15,22 +15,31 @@ class CheckerBug < RuntimeError
 end
 
 class FnScope
-  attr_reader :passed_block
+  attr_reader :passed_block, :is_constructor
   #: fn(Rmetaclass | Rclass, Rblock | nil)
-  def initialize(in_class, parent_scope, passed_block)
+  def initialize(in_class, parent_scope, passed_block, is_constructor: false)
     @in_class = in_class
     @local_scope = {}
     @parent_scope = parent_scope
     @passed_block = passed_block
+    @is_constructor = is_constructor
   end
 
+  #: fn(String) > [Rbindable, Rbindable]
+  # returns       [object, scope]
   def lookup(name)
-    o = @local_scope[name] || @parent_scope&.lookup(name)
-    if o then o else @in_class.lookup(name) end
+    r = [@local_scope[name], @in_class]
+    if r[0] == nil && @parent_scope then r = @parent_scope.lookup(name) end
+    if r[0] == nil then r = @in_class.lookup(name) end
+    r
   end
 
   def define(rscopebinding)
     @local_scope[rscopebinding.name] = rscopebinding
+  end
+
+  def define_ivar(rscopebinding)
+    @in_class.define(rscopebinding)
   end
 end
 
@@ -103,11 +112,12 @@ class FnSig
 end
 
 class Rblock
-  attr_reader :sig, :body_node
+  attr_reader :sig, :body_node, :fn_scope
   # fn(Array[String], node)
-  def initialize(arg_names, body_node)
+  def initialize(arg_names, body_node, fn_scope)
     @sig = FnSig.new
     @sig.add_named_args(arg_names.map { |name| [name, nil] })
+    @fn_scope = fn_scope
     @body_node = body_node
   end
 end
@@ -143,15 +153,17 @@ end
 
 class Rfunc < Rbindable
   attr_accessor :node, :body, :sig, :block_sig
+  attr_reader :is_constructor
 
   #: fn(String, Rbindable, Array[Rbindable])
-  def initialize(name, return_type, anon_args = [])
+  def initialize(name, return_type, anon_args = [], is_constructor: false)
     super(name, nil)
     @sig = FnSig.new
     @sig.add_anon_args(anon_args)
     @sig.return_type = return_type
     @block_sig = nil
     @node = nil
+    @is_constructor = is_constructor
   end
 
   def type_unknown?
@@ -174,13 +186,15 @@ class Rfunc < Rbindable
 end
 
 class Rmetaclass < Rbindable
-  def initialize(parent_name)
+  attr_reader :metaclass_for
+  def initialize(parent_name, metaclass_for)
     super("#{parent_name}:Class", nil)
     @namespace = {}
+    @metaclass_for = metaclass_for
   end
 
   def lookup(method_name)
-    @namespace[method_name]
+    [@namespace[method_name], self]
   end
 
   def define(rscopebinding)
@@ -191,7 +205,7 @@ end
 class Rclass < Rbindable
   attr_reader :metaclass, :namespace
   def initialize(name, parent_class)
-    @metaclass = Rmetaclass.new(name)
+    @metaclass = Rmetaclass.new(name, self)
     super(name, @metaclass)
     @parent = parent_class
     @namespace = {}
@@ -200,11 +214,11 @@ class Rclass < Rbindable
   def lookup(method_name)
     m = @namespace[method_name]
     if m
-      m
+      [m, self]
     elsif @parent
       @parent.lookup(method_name)
     else
-      nil
+      [nil, nil]
     end
   end
 
@@ -279,12 +293,16 @@ class Context
       case e[1]
       when :type_unknown
         "Type '#{e[2]}' not found in this scope"
+      when :ivar_assign_outside_constructor
+        "Instance variable assignment (of '#{e[2]}') outside the constructor is obfuscatory. Assignment ignored."
       when :fn_unknown
         "Type '#{e[3]}' has no method named '#{e[2]}'"
       when :const_unknown
         "Constant '#{e[2]}' not found in this scope"
       when :lvar_unknown
         "Local variable '#{e[2]}' not found in this scope"
+      when :ivar_unknown
+        "Instance variable '#{e[2]}' not found in this scope"
       when :gvar_unknown
         "Global variable '#{e[2]}' not found"
       when :if_not_boolean
@@ -319,8 +337,8 @@ class Context
     
     require "parser/current"
     @robject = make_root()
-    @rnil = @robject.lookup(:nil)
-    @rboolean = @robject.lookup('Boolean')
+    @rnil = @robject.lookup(:nil)[0]
+    @rboolean = @robject.lookup('Boolean')[0]
     @rundefined = Rundefined.new
     @scope = [@robject]
     @callstack = [FnScope.new(@robject, nil, nil)]
@@ -393,15 +411,23 @@ class Context
     when :defs # define static method
       n_defs(node)
     when :gvar
-      gvar = @robject.lookup(node.children[0].to_s)
+      gvar = @robject.lookup(node.children[0].to_s)[0]
       if gvar == nil
         @errors << [node, :gvar_unknown, node.children[0].to_s]
         @rundefined
       else
         gvar.type
       end
+    when :ivar
+      ivar = callstack_top.lookup(node.children[0].to_s)[0]
+      if ivar == nil
+        @errors << [node, :ivar_unknown, node.children[0].to_s]
+        @rundefined
+      else
+        ivar.type
+      end
     when :lvar
-      lvar = callstack_top.lookup(node.children[0].to_s)
+      lvar = callstack_top.lookup(node.children[0].to_s)[0]
       if lvar == nil
         @errors << [node, :lvar_unknown, node.children[0].to_s]
         @rundefined
@@ -440,6 +466,7 @@ class Context
     when :str
       type_lookup!(node, @robject, 'String')
     when :dstr # XXX could check dstr
+      puts "XXX need to handle dstr properly"
       type_lookup!(node, @robject, 'String')
     when :true
       type_lookup!(node, @robject, 'Boolean')
@@ -450,7 +477,7 @@ class Context
     when :yield
       n_yield(node)
     when :const
-      c = scope_top.lookup(node.children[1].to_s)
+      c = scope_top.lookup(node.children[1].to_s)[0]
       if c
         c.type
       else
@@ -472,7 +499,7 @@ class Context
       return @rundefined
     end
 
-    function_scope = FnScope.new(scope_top, callstack_top, nil)
+    function_scope = FnScope.new(scope_top, block.fn_scope, nil)
     # define lvars from arguments
     block.sig.args.each { |a| function_scope.define(Rlvar.new(a[0], a[1])) }
 
@@ -487,7 +514,7 @@ class Context
   def n_class(node)
     class_name = node.children[0].children[1].to_s
     parent_class_name = node.children[1]&.children&.last&.to_s
-    parent_class = parent_class_name == nil ? @robject : scope_top.lookup(parent_class_name)
+    parent_class = parent_class_name == nil ? @robject : scope_top.lookup(parent_class_name)[0]
 
     new_class = Rclass.new(
       class_name,
@@ -499,8 +526,8 @@ class Context
     r = n_expr(node.children[2])
 
     # define a 'new' static method if 'initialize' was not defined
-    if scope_top.metaclass.lookup('new') == nil
-      scope_top.metaclass.define(Rfunc.new('new', scope_top))
+    if scope_top.metaclass.lookup('new')[0] == nil
+      scope_top.metaclass.define(Rfunc.new('new', new_class))
     end
 
     pop_scope()
@@ -517,7 +544,7 @@ class Context
       return @rundefined
     end
 
-    type = scope.lookup(type_identifier)
+    type = scope.lookup(type_identifier)[0]
 
     if type == nil then
       # type not found
@@ -530,19 +557,36 @@ class Context
 
   # assign instance variable
   def n_ivasgn(node)
-    raise "n_ivasgn not implemented at line #{node.loc.line}"
+    name = node.children[0].to_s
+    type = n_expr(node.children[1])
+
+    if type == @rundefined
+      # error already reported. do nothing
+    elsif callstack_top.lookup(name)[0] == nil
+      if callstack_top.is_constructor == false
+        @errors << [node, :ivar_assign_outside_constructor, name]
+      else
+        callstack_top.define_ivar(Rlvar.new(name, type))
+      end
+    elsif callstack_top.lookup(name)[0].type != type
+      @errors << [node, :var_type, name, callstack_top.lookup(name)[0].type.name, type.name]
+    else
+      # binding already existed. types match. cool
+    end
   end
 
   def n_lvasgn(node)
     name = node.children[0].to_s
     type = n_expr(node.children[1])
 
+    rbinding, _ = callstack_top.lookup(name)
+
     if type == @rundefined
       # error already reported. do nothing
-    elsif callstack_top.lookup(name) == nil
+    elsif rbinding == nil
       callstack_top.define(Rlvar.new(name, type))
-    elsif callstack_top.lookup(name).type != type
-      @errors << [node, :var_type, name, callstack_top.lookup(name).type.name, type.name]
+    elsif rbinding.type != type
+      @errors << [node, :var_type, name, rbinding.type.name, type.name]
     end
   end
 
@@ -552,7 +596,7 @@ class Context
 
     if type == nil
       # error already reported. do nothing
-    elsif scope_top.lookup(name) == nil
+    elsif scope_top.lookup(name)[0] == nil
       scope_top.define(Rconst.new(name, type))
     else
       @errors << [node, :const_redef, name]
@@ -566,7 +610,7 @@ class Context
 
     raise CheckerBug.new("expected :send, found #{send_node.type} in :block") unless send_node.type == :send
 
-    n_send(send_node, block = Rblock.new(block_arg_names, block_body))
+    n_send(send_node, block = Rblock.new(block_arg_names, block_body, callstack_top))
   end
 
   # returns return type of method/function (or nil if not determined)
@@ -587,11 +631,14 @@ class Context
     arg_types = node.children[2..-1].map {|n| n_expr(n) }
     num_args = arg_types.length
 
-    if scope.lookup(name) == nil
+    # find actual class the method was retrieved from. eg may be parent class of 'scope'
+    fn, call_scope = scope.lookup(name)
+
+    if fn == nil
       @errors << [node, :fn_unknown, name, scope.name]
       return @rundefined
-    elsif scope.lookup(name).kind_of?(Rfunc)
-      return_type, errors = function_call(scope, scope.lookup(name), node, arg_types, block)
+    elsif fn.kind_of?(Rfunc)
+      return_type, errors = function_call(call_scope, fn, node, arg_types, block)
       @errors = @errors + errors
       if return_type == nil and !errors.empty?
         return @rundefined
@@ -607,6 +654,12 @@ class Context
   # @returns [return_type, errors]
   # updates @fn_sig with param types if nil
   def function_call(scope, fn, node, args, block)
+    if fn.is_constructor
+      if !scope.is_a?(Rmetaclass)
+        raise CheckerBug, 'constructor not called with scope of metaclass'
+      end
+      scope = scope.metaclass_for
+    end
     type_errors = fn.sig.call_typecheck?(node, fn.name, args, block)
 
     if !type_errors.empty?
@@ -618,13 +671,14 @@ class Context
     end
 
     if fn.body != nil # means not a purely 'header' function def (ie ruby standard lib type stubs)
-      function_scope = FnScope.new(scope, callstack_top, block)
+      function_scope = FnScope.new(scope, nil, block, is_constructor: fn.is_constructor)
       # define lvars from arguments
       fn.sig.args.each { |a| function_scope.define(Rlvar.new(a[0], a[1])) }
 
       # find function return type by evaluating body with concrete argument types in scope
       push_callstack(function_scope)
-      fn.return_type = n_expr(fn.body)
+      ret = n_expr(fn.body)
+      fn.return_type = ret unless fn.is_constructor
       pop_callstack()
 
       if block
@@ -664,7 +718,7 @@ class Context
     # define function with no known argument types (so far)
     if name == 'initialize'
       # assume return type for 'new' method
-      fn = Rfunc.new('new', scope_top)
+      fn = Rfunc.new('new', scope_top, is_constructor: true)
       fn.add_named_args(arg_name_type)
       fn.node = node
       fn.body = node.children[2]
