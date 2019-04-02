@@ -332,7 +332,7 @@ class Context
   end
 
   def self.error_msg(filename, e)
-    "#{filename}:#{e[0]&.loc&.line}:#{e[0]&.loc&.column + 1}: E: " +
+    "#{filename}:#{e[0]&.loc&.line}:#{e[0]&.loc&.column&.+ 1}: E: " +
       case e[1]
       when :type_unknown
         "Type '#{e[2]}' not found in this scope"
@@ -373,7 +373,7 @@ class Context
       end
   end
 
-  def initialize(source)
+  def initialize
     # '24' if RUBY_VERSION='2.4.4'
     #ruby_version = RUBY_VERSION.split('.').take(2).join
     #require "parser/ruby#{ruby_version}"
@@ -387,17 +387,19 @@ class Context
     @scope = [@robject]
     @callstack = [FnScope.new(@robject, nil, nil)]
     @errors = []
+  end
+
+  def check(source)
+    @errors = []
     begin
-      @ast = Parser::CurrentRuby.parse(source)
+      ast = Parser::CurrentRuby.parse(source)
     rescue StandardError => e
       # XXX todo - get line number
       @errors << [nil, :parse_error, e.to_s]
+    else
+      n_expr(ast)
+      check_function_type_inference_succeeded(@robject)
     end
-  end
-
-  def check
-    if @ast then n_expr(@ast) end
-    check_function_type_inference_succeeded(@robject)
     @errors
   end
 
@@ -817,7 +819,7 @@ if __FILE__ == $0
   ARGV.each do |filename|
     source = File.open(filename).read
 
-    errors = Context.new(source).check
+    errors = Context.new.check(source)
     if !errors.empty?
       got_errors = true
       puts errors.map{|e| Context.error_msg(filename, e)}.join("\n")

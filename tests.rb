@@ -7,7 +7,7 @@ def node_to_line_nums(errors)
 end
 
 def parse_str(str)
-  node_to_line_nums(Context.new(str).check)
+  node_to_line_nums(Context.new.check(str))
 end
 
 def parse_file(filename)
@@ -368,23 +368,7 @@ class TestLucidCheck < Test::Unit::TestCase
   end
 
   def test_template_methods
-    ctx = Context.new(
-        <<-RUBY
-          a = fun1(1, 'hi')
-          b = fun1(3.4, 4.4)
-          b = 2
-          c = fun2(1, 'x', 3.4, :hi, 2)
-          d = fun2(false, 2, true, 3, false)
-          d = nil
-          e = fun3(1) { |x| x.to_f }
-          e = 2
-          f = fun3('yes') { |x| x.whaa }
-          g = fun3('yes') { || nil }
-          h = fun4('hi') { |x| 4.5  }
-          i = 123
-          i = i.fun5('unused')  # generically returns 'Self' type
-        RUBY
-    )
+    ctx = Context.new
     # define a: fn<T>(T,T) -> T, and fn<T,U>(T,U,T,U,T) -> U
     _t = TemplateType.new
     _u = TemplateType.new
@@ -410,21 +394,28 @@ class TestLucidCheck < Test::Unit::TestCase
        [9, :fn_unknown, 'whaa', 'String'],
        [10, :block_arg_num, 'fun3', 1, 0],
        [11, :block_arg_type, 'fun4', '(String) > Integer', '(String) > Float']],
-      node_to_line_nums(ctx.check)
-    )
+      node_to_line_nums(ctx.check(
+        <<-RUBY
+          a = fun1(1, 'hi')
+          b = fun1(3.4, 4.4)
+          b = 2
+          c = fun2(1, 'x', 3.4, :hi, 2)
+          d = fun2(false, 2, true, 3, false)
+          d = nil
+          e = fun3(1) { |x| x.to_f }
+          e = 2
+          f = fun3('yes') { |x| x.whaa }
+          g = fun3('yes') { || nil }
+          h = fun4('hi') { |x| 4.5  }
+          i = 123
+          i = i.fun5('unused')  # generically returns 'Self' type
+        RUBY
+      )
+    ))
   end
 
   def test_self_template_type
-    ctx = Context.new(
-        <<-RUBY
-          a = 123
-          a = a.fun1('unused')
-          a = 345.fun1(4.5)
-          a = 'hi'.fun1('unused')
-          a = a.fun2(nil) { |x| x }
-          a = a.fun2(nil) { |x| nil }
-        RUBY
-    )
+    ctx = Context.new
     _t = TemplateType.new
     # define fn<T>(T) -> Self
     ctx.object.define(Rfunc.new('fun1', ctx.rself, [_t]))
@@ -437,7 +428,16 @@ class TestLucidCheck < Test::Unit::TestCase
     assert_equal(
       [[4, :var_type, 'a', 'Integer', 'String'],
        [6, :block_arg_type, 'fun2', '(Integer) > Integer', '(Integer) > nil']],
-      node_to_line_nums(ctx.check)
+      node_to_line_nums(ctx.check(
+        <<-RUBY
+          a = 123
+          a = a.fun1('unused')
+          a = 345.fun1(4.5)
+          a = 'hi'.fun1('unused')
+          a = a.fun2(nil) { |x| x }
+          a = a.fun2(nil) { |x| nil }
+        RUBY
+      ))
     )
   end
 end
