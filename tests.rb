@@ -381,6 +381,8 @@ class TestLucidCheck < Test::Unit::TestCase
           f = fun3('yes') { |x| x.whaa }
           g = fun3('yes') { || nil }
           h = fun4('hi') { |x| 4.5  }
+          i = 123
+          i = i.fun5('unused')  # generically returns 'Self' type
         RUBY
     )
     # define a: fn<T>(T,T) -> T, and fn<T,U>(T,U,T,U,T) -> U
@@ -396,6 +398,8 @@ class TestLucidCheck < Test::Unit::TestCase
     ctx.object.define(
       Rfunc.new('fun4', _u, [_t], block_sig: FnSig.new(ctx.object.lookup('Integer')[0], [_t]))
     )
+    # define fn<T>(T) -> Self
+    ctx.object.define(Rfunc.new('fun5', ctx.rself, [_t]))
   
     assert_equal(
       [[1, :fn_arg_type, 'fun1', 'Integer,Integer', 'Integer,String'],
@@ -406,6 +410,33 @@ class TestLucidCheck < Test::Unit::TestCase
        [9, :fn_unknown, 'whaa', 'String'],
        [10, :block_arg_num, 'fun3', 1, 0],
        [11, :block_arg_type, 'fun4', '(String) > Integer', '(String) > Float']],
+      node_to_line_nums(ctx.check)
+    )
+  end
+
+  def test_self_template_type
+    ctx = Context.new(
+        <<-RUBY
+          a = 123
+          a = a.fun1('unused')
+          a = 345.fun1(4.5)
+          a = 'hi'.fun1('unused')
+          a = a.fun2(nil) { |x| x }
+          a = a.fun2(nil) { |x| nil }
+        RUBY
+    )
+    _t = TemplateType.new
+    # define fn<T>(T) -> Self
+    ctx.object.define(Rfunc.new('fun1', ctx.rself, [_t]))
+    # define fn<T>(T, &block(Self) > Self) -> Self
+    ctx.object.define(
+      Rfunc.new('fun2', ctx.rself, [_t],
+                block_sig: FnSig.new(ctx.rself, [ctx.rself]))
+    )
+  
+    assert_equal(
+      [[4, :var_type, 'a', 'Integer', 'String'],
+       [6, :block_arg_type, 'fun2', '(Integer) > Integer', '(Integer) > nil']],
       node_to_line_nums(ctx.check)
     )
   end

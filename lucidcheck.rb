@@ -81,8 +81,7 @@ class FnSig
   end
 
   #: fn(Array[Rbindable]) > Array[error]
-  def call_typecheck?(node, fn_name, passed_args, block)
-    template_types = {}
+  def call_typecheck?(node, fn_name, passed_args, mut_template_types, block)
 
     if passed_args.map { |a| a == nil }.any?
       raise CheckerBug.new("Passed nil arg to method #{fn_name}. weird. args: #{passed_args}")
@@ -90,7 +89,7 @@ class FnSig
     end
 
     if passed_args.length != @args.length
-      return [{}, [[node, :fn_arg_num, fn_name, @args.length, passed_args.length]]]
+      return [[node, :fn_arg_num, fn_name, @args.length, passed_args.length]]
     end
 
     # collect arg types if we know none
@@ -103,20 +102,20 @@ class FnSig
       def_type = definition[1]
       if def_type.is_a?(TemplateType)
         #template arg
-        t = template_types[def_type]
+        t = mut_template_types[def_type]
         if t.nil?
-          template_types[def_type] = passed
+          mut_template_types[def_type] = passed
         elsif t != passed
-          return [{}, [function_call_type_error(node, fn_name, passed_args, template_types)]]
+          return [function_call_type_error(node, fn_name, passed_args, mut_template_types)]
         end
       else
         # normal arg
         if def_type != passed
-          return [{}, [function_call_type_error(node, fn_name, passed_args, template_types)]]
+          return [function_call_type_error(node, fn_name, passed_args, mut_template_types)]
         end
       end
     }
-    [template_types, []]
+    []
   end
 
   def args_to_s(template_types = {})
@@ -179,6 +178,11 @@ class TemplateType < Rbindable
   end
 end
 
+class SelfType < Rbindable
+  def initialize
+    super(:genericSelf, nil)
+  end
+end
 
 class Rlvar < Rbindable
 end
@@ -321,6 +325,8 @@ def make_root
 end
 
 class Context
+  attr_reader :rself
+
   def object
     @robject
   end
@@ -374,6 +380,7 @@ class Context
     
     require "parser/current"
     @robject = make_root()
+    @rself = SelfType.new
     @rnil = @robject.lookup(:nil)[0]
     @rboolean = @robject.lookup('Boolean')[0]
     @rundefined = Rundefined.new
@@ -527,7 +534,7 @@ class Context
   end
 
   def block_call(node, block, passed_args, mut_template_types)
-    template_types, type_errors = block.sig.call_typecheck?(node, '<block>', passed_args, nil)
+    type_errors = block.sig.call_typecheck?(node, '<block>', passed_args, mut_template_types, nil)
 
     if !type_errors.empty?
       @errors.concat(type_errors)
@@ -662,57 +669,51 @@ class Context
       if self_type.kind_of?(Rundefined)
         return self_type
       else
-        scope = self_type
+        type_scope = self_type
       end
     else
-      scope = scope_top
+      type_scope = scope_top
     end
-    raise CheckerBug, 'invalid nil scope' if scope.nil?
+    raise CheckerBug, 'invalid nil type_scope' if type_scope.nil?
     name = node.children[1].to_s
     arg_types = node.children[2..-1].map {|n| n_expr(n) }
     num_args = arg_types.length
 
-    # find actual class the method was retrieved from. eg may be parent class of 'scope'
-    fn, call_scope = scope.lookup(name)
+    # find actual class the method was retrieved from. eg may be parent class of 'type_scope'
+    fn, call_scope = type_scope.lookup(name)
 
     if fn == nil
-      @errors << [node, :fn_unknown, name, scope.name]
+      @errors << [node, :fn_unknown, name, type_scope.name]
       return @rundefined
     elsif fn.kind_of?(Rfunc)
-      return_type, errors = function_call(call_scope, fn, node, arg_types, block)
-      @errors = @errors + errors
-      if return_type == nil and !errors.empty?
-        return @rundefined
-      else
-        return return_type
-      end
+      return_type = function_call(type_scope, call_scope, fn, node, arg_types, block)
+      return return_type
     else
       @errors << [node, :not_a_function, name]
       return @rundefined
     end
   end
 
-  # @returns [return_type, errors]
-  # updates @fn_sig with param types if nil
-  def function_call(scope, fn, node, args, block)
+  # in the example of '1.2'.to_f:
+  # type_scope = String
+  # call_scope = Object (because to_f is on Object)
+  # fn = RFunc of whatever Object.method(:to_f) is
+  def function_call(type_scope, call_scope, fn, node, args, block)
     if fn.is_constructor
-      if !scope.is_a?(Rmetaclass)
+      if !call_scope.is_a?(Rmetaclass)
         raise CheckerBug, 'constructor not called with scope of metaclass'
       end
-      scope = scope.metaclass_for
+      call_scope = call_scope.metaclass_for
     end
-    template_types, type_errors = fn.sig.call_typecheck?(node, fn.name, args, block)
+    template_types = { @rself => type_scope }
+    type_errors = fn.sig.call_typecheck?(node, fn.name, args, template_types, block)
 
     if !type_errors.empty?
-      return [fn.return_type, type_errors]
-    end
-
-    if fn.block_sig && block.sig.args.length != fn.block_sig.args.length
-      return [fn.return_type, [[node, :block_arg_num, fn.name, fn.block_sig.args.length, block.sig.args.length]]]
-    end
-
-    if fn.body != nil # means not a purely 'header' function def (ie ruby standard lib type stubs)
-      function_scope = FnScope.new(scope, nil, block, is_constructor: fn.is_constructor)
+      @errors.concat(type_errors)
+    elsif fn.block_sig && block.sig.args.length != fn.block_sig.args.length
+      @errors << [node, :block_arg_num, fn.name, fn.block_sig.args.length, block.sig.args.length]
+    elsif fn.body != nil # means not a purely 'header' function def (ie ruby standard lib type stubs)
+      function_scope = FnScope.new(call_scope, nil, block, is_constructor: fn.is_constructor)
       # define lvars from arguments
       fn.sig.args.each { |a| function_scope.define(Rlvar.new(a[0], a[1])) }
 
@@ -725,30 +726,39 @@ class Context
       if block
         if fn.block_sig && !fn.block_sig.structural_eql?(block.sig, template_types)
           # block type mismatch
-          return [fn.return_type, [[node, :block_arg_type, fn.name, fn.block_sig.sig_to_s(template_types), block.sig.sig_to_s(template_types)]]]
+          @errors << [node, :block_arg_type, fn.name, fn.block_sig.sig_to_s(template_types), block.sig.sig_to_s(template_types)]
         else
           fn.block_sig = block.sig
         end
       end
     else
-      # resolve template types
+      # purely 'header' function def. resolve template types
       if block && fn.block_sig
         block_args = fn.block_sig.get_specialized_args(template_types)
         block_ret = block_call(node, block, block_args, template_types)
-        expected_ret = fn.block_sig.return_type
-        expected_ret = template_types[expected_ret] || expected_ret
+        expected_ret = to_concrete_type(fn.block_sig.return_type, type_scope, template_types)
 
         if expected_ret.is_a?(TemplateType)
           # discover template return type
           template_types[expected_ret] = block_ret
         elsif expected_ret != block_ret
           # block return type mismatch
-          return [fn.return_type, [[node, :block_arg_type, fn.name, fn.block_sig.sig_to_s(template_types), block.sig.sig_to_s(template_types)]]]
+          @errors << [node, :block_arg_type, fn.name, fn.block_sig.sig_to_s(template_types), block.sig.sig_to_s(template_types)]
         end
       end
     end
 
-    [template_types[fn.return_type] || fn.return_type, []]
+    to_concrete_type(fn.return_type, type_scope, template_types)
+  end
+
+  def to_concrete_type(type, self_type, template_types)
+    if type.is_a?(SelfType)
+      self_type
+    elsif type.is_a?(TemplateType)
+      template_types[type] || type
+    else
+      type
+    end
   end
 
   # define static method
