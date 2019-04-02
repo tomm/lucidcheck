@@ -366,4 +366,47 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
   end
+
+  def test_template_methods
+    ctx = Context.new(
+        <<-RUBY
+          a = fun1(1, 'hi')
+          b = fun1(3.4, 4.4)
+          b = 2
+          c = fun2(1, 'x', 3.4, :hi, 2)
+          d = fun2(false, 2, true, 3, false)
+          d = nil
+          e = fun3(1) { |x| x.to_f }
+          e = 2
+          f = fun3('yes') { |x| x.whaa }
+          g = fun3('yes') { || nil }
+          h = fun4('hi') { |x| 4.5  }
+        RUBY
+    )
+    # define a: fn<T>(T,T) -> T, and fn<T,U>(T,U,T,U,T) -> U
+    _t = TemplateType.new
+    _u = TemplateType.new
+    ctx.object.define(Rfunc.new('fun1', _t, [_t, _t]))
+    ctx.object.define(Rfunc.new('fun2', _u, [_t, _u, _t, _u, _t]))
+    # define a fn<U>(T, &block(T) > U) -> U
+    ctx.object.define(
+      Rfunc.new('fun3', _u, [_t], block_sig: FnSig.new(_u, [_t]))
+    )
+    # define a fn<U>(T, &block(T) > Integer) -> U
+    ctx.object.define(
+      Rfunc.new('fun4', _u, [_t], block_sig: FnSig.new(ctx.object.lookup('Integer')[0], [_t]))
+    )
+  
+    assert_equal(
+      [[1, :fn_arg_type, 'fun1', 'Integer,Integer', 'Integer,String'],
+       [3, :var_type, 'b', 'Float', 'Integer'],
+       [4, :fn_arg_type, 'fun2', 'Integer,String,Integer,String,Integer', 'Integer,String,Float,Symbol,Integer'],
+       [6, :var_type, 'd', 'Integer', :nil],
+       [8, :var_type, 'e', 'Float', 'Integer'],
+       [9, :fn_unknown, 'whaa', 'String'],
+       [10, :block_arg_num, 'fun3', 1, 0],
+       [11, :block_arg_type, 'fun4', '(String) > Integer', '(String) > Float']],
+      node_to_line_nums(ctx.check)
+    )
+  end
 end

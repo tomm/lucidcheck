@@ -46,9 +46,10 @@ end
 class FnSig
   attr_accessor :args, :return_type
 
-  def initialize
+  def initialize(return_type, anon_args)
     @args = []
-    @return_type = nil
+    @return_type = return_type
+    add_anon_args(anon_args)
   end
 
   #: fn(Array[Rbindable])
@@ -66,20 +67,30 @@ class FnSig
     @args.map{ |a| a[1] == nil }.any? || @return_type.kind_of?(Rundefined)
   end
 
+  def get_specialized_args(template_types)
+    @args.map{ |a| template_types[a[1]] || a[1] }
+  end
+
   #: fn(FnSig)
-  def structural_eql?(other_sig)
-    (@return_type == other_sig.return_type) && (other_sig.args.map{|v|v[1]} == @args.map{|v|v[1]})
+  def structural_eql?(other_sig, template_types = {})
+    ret = template_types[@return_type] || @return_type
+    args_match = other_sig.args.map { |v|
+        template_types[v[1]] || v[1]
+    } == @args.map{|v|v[1]}
+    return (ret == other_sig.return_type) && args_match
   end
 
   #: fn(Array[Rbindable]) > Array[error]
   def call_typecheck?(node, fn_name, passed_args, block)
+    template_types = {}
+
     if passed_args.map { |a| a == nil }.any?
       raise CheckerBug.new("Passed nil arg to method #{fn_name}. weird. args: #{passed_args}")
       #return [[node, :fn_inference_fail, fn_name]]
     end
 
     if passed_args.length != @args.length
-      return [[node, :fn_arg_num, fn_name, @args.length, passed_args.length]]
+      return [{}, [[node, :fn_arg_num, fn_name, @args.length, passed_args.length]]]
     end
 
     # collect arg types if we know none
@@ -88,26 +99,43 @@ class FnSig
     end
 
     # type check arguments
-    if @args.map {|a| a[1]} != passed_args
-      [function_call_type_error(node, fn_name, passed_args)]
-    else
-      []
-    end
+    @args.zip(passed_args).each { |definition, passed|
+      def_type = definition[1]
+      if def_type.is_a?(TemplateType)
+        #template arg
+        t = template_types[def_type]
+        if t.nil?
+          template_types[def_type] = passed
+        elsif t != passed
+          return [{}, [function_call_type_error(node, fn_name, passed_args, template_types)]]
+        end
+      else
+        # normal arg
+        if def_type != passed
+          return [{}, [function_call_type_error(node, fn_name, passed_args, template_types)]]
+        end
+      end
+    }
+    [template_types, []]
   end
 
-  def args_to_s
-    @args.map { |a| a[1]&.name || '?' }.join(',')
+  def args_to_s(template_types = {})
+    @args.map { |a| template_types[a[1]]&.name || a[1]&.name || '?' }.join(',')
+  end
+
+  def sig_to_s(template_types = {})
+    "(#{args_to_s(template_types)}) > #{(template_types[@return_type] || @return_type)&.name || '?'}"
   end
 
   def to_s
-    "(#{args_to_s}) > #{@return_type&.name || '?'}"
+    sig_to_s({})
   end
 
   private
 
   #: fn() > Array[error]
-  def function_call_type_error(node, fn_name, passed_args)
-    [node, :fn_arg_type, fn_name, args_to_s, passed_args.map(&:name).join(',')]
+  def function_call_type_error(node, fn_name, passed_args, template_types)
+    [node, :fn_arg_type, fn_name, args_to_s(template_types), passed_args.map(&:name).join(',')]
   end
 end
 
@@ -115,7 +143,7 @@ class Rblock
   attr_reader :sig, :body_node, :fn_scope
   # fn(Array[String], node)
   def initialize(arg_names, body_node, fn_scope)
-    @sig = FnSig.new
+    @sig = FnSig.new(nil, [])
     @sig.add_named_args(arg_names.map { |name| [name, nil] })
     @fn_scope = fn_scope
     @body_node = body_node
@@ -145,6 +173,13 @@ class Rundefined < Rbindable
   end
 end
 
+class TemplateType < Rbindable
+  def initialize
+    super(:generic, nil)
+  end
+end
+
+
 class Rlvar < Rbindable
 end
 
@@ -156,12 +191,10 @@ class Rfunc < Rbindable
   attr_reader :is_constructor
 
   #: fn(String, Rbindable, Array[Rbindable])
-  def initialize(name, return_type, anon_args = [], is_constructor: false)
+  def initialize(name, return_type, anon_args = [], is_constructor: false, block_sig: nil)
     super(name, nil)
-    @sig = FnSig.new
-    @sig.add_anon_args(anon_args)
-    @sig.return_type = return_type
-    @block_sig = nil
+    @sig = FnSig.new(return_type, anon_args)
+    @block_sig = block_sig
     @node = nil
     @is_constructor = is_constructor
   end
@@ -253,13 +286,15 @@ def make_root
   rinteger = robject.define(Rclass.new('Integer', robject))
   rfloat   = robject.define(Rclass.new('Float', robject))
   rboolean = robject.define(Rclass.new('Boolean', robject))
-  
+
   robject.define(Rlvar.new('$0', rstring))
   robject.define(Rfunc.new('require', rnil, [rstring]))
   robject.define(Rfunc.new('puts', rnil, [rstring]))
   robject.define(Rfunc.new('exit', rnil, [rinteger]))
   robject.define(Rfunc.new('rand', rfloat, []))
   robject.define(Rfunc.new('to_s', rstring, []))
+  robject.define(Rfunc.new('to_f', rfloat, []))
+  robject.define(Rfunc.new('to_i', rinteger, []))
 
   rstring.define(Rfunc.new('upcase', rstring, []))
   rstring.define(Rfunc.new('==', rboolean, [rstring]))
@@ -268,7 +303,6 @@ def make_root
   rinteger.define(Rfunc.new('-', rinteger, [rinteger]))
   rinteger.define(Rfunc.new('*', rinteger, [rinteger]))
   rinteger.define(Rfunc.new('/', rinteger, [rinteger]))
-  rinteger.define(Rfunc.new('to_f', rfloat, []))
   rinteger.define(Rfunc.new('>', rboolean, [rinteger]))
   rinteger.define(Rfunc.new('>=', rboolean, [rinteger]))
   rinteger.define(Rfunc.new('<', rboolean, [rinteger]))
@@ -282,12 +316,15 @@ def make_root
   rfloat.define(Rfunc.new('>=', rboolean, [rfloat]))
   rfloat.define(Rfunc.new('<', rboolean, [rfloat]))
   rfloat.define(Rfunc.new('<=', rboolean, [rfloat]))
-  rfloat.define(Rfunc.new('to_i', rinteger, []))
 
   robject
 end
 
 class Context
+  def object
+    @robject
+  end
+
   def self.error_msg(filename, e)
     "#{filename}:#{e[0]&.loc&.line}:#{e[0]&.loc&.column + 1}: E: " +
       case e[1]
@@ -489,10 +526,8 @@ class Context
     end
   end
 
-  def n_yield(node)
-    args = node.children.map {|n| n_expr(n) }
-    block = callstack_top.passed_block
-    type_errors = block.sig.call_typecheck?(node, '<block>', args, nil)
+  def block_call(node, block, passed_args, mut_template_types)
+    template_types, type_errors = block.sig.call_typecheck?(node, '<block>', passed_args, nil)
 
     if !type_errors.empty?
       @errors.concat(type_errors)
@@ -509,6 +544,12 @@ class Context
     pop_callstack()
 
     block.sig.return_type
+  end
+
+  def n_yield(node)
+    args = node.children.map {|n| n_expr(n) }
+    block = callstack_top.passed_block
+    block_call(node, block, args, {})
   end
 
   def n_class(node)
@@ -660,7 +701,7 @@ class Context
       end
       scope = scope.metaclass_for
     end
-    type_errors = fn.sig.call_typecheck?(node, fn.name, args, block)
+    template_types, type_errors = fn.sig.call_typecheck?(node, fn.name, args, block)
 
     if !type_errors.empty?
       return [fn.return_type, type_errors]
@@ -682,16 +723,32 @@ class Context
       pop_callstack()
 
       if block
-        if fn.block_sig && !fn.block_sig.structural_eql?(block.sig)
+        if fn.block_sig && !fn.block_sig.structural_eql?(block.sig, template_types)
           # block type mismatch
-          return [fn.return_type, [[node, :block_arg_type, fn.name, fn.block_sig.to_s, block.sig.to_s]]]
+          return [fn.return_type, [[node, :block_arg_type, fn.name, fn.block_sig.sig_to_s(template_types), block.sig.sig_to_s(template_types)]]]
         else
           fn.block_sig = block.sig
         end
       end
+    else
+      # resolve template types
+      if block && fn.block_sig
+        block_args = fn.block_sig.get_specialized_args(template_types)
+        block_ret = block_call(node, block, block_args, template_types)
+        expected_ret = fn.block_sig.return_type
+        expected_ret = template_types[expected_ret] || expected_ret
+
+        if expected_ret.is_a?(TemplateType)
+          # discover template return type
+          template_types[expected_ret] = block_ret
+        elsif expected_ret != block_ret
+          # block return type mismatch
+          return [fn.return_type, [[node, :block_arg_type, fn.name, fn.block_sig.sig_to_s(template_types), block.sig.sig_to_s(template_types)]]]
+        end
+      end
     end
 
-    [fn.return_type, []]
+    [template_types[fn.return_type] || fn.return_type, []]
   end
 
   # define static method
