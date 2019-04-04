@@ -81,7 +81,7 @@ class FnSig
   end
 
   #: fn(Array[Rbindable]) > Array[error]
-  def call_typecheck?(node, fn_name, passed_args, mut_template_types, block)
+  def call_typecheck?(node, fn_name, passed_args, mut_template_types, block, self_type)
 
     if passed_args.map { |a| a == nil }.any?
       raise CheckerBug.new("Passed nil arg to method #{fn_name}. weird. args: #{passed_args}")
@@ -103,7 +103,12 @@ class FnSig
       if def_type.is_a?(TemplateType)
         #template arg
         t = mut_template_types[def_type]
-        if t.nil?
+        if t.nil? || t.is_a?(TemplateType)
+          if self_type.is_a?(Rconcreteclass)
+            if self_type.specialize(def_type, passed) == false
+              return [function_call_type_error(node, fn_name, passed_args, mut_template_types)]
+            end
+          end
           mut_template_types[def_type] = passed
         elsif t != passed
           return [function_call_type_error(node, fn_name, passed_args, mut_template_types)]
@@ -162,6 +167,10 @@ class Rbindable
 
   def to_s
     @name
+  end
+
+  def new_bind
+    self
   end
 end
 
@@ -230,6 +239,9 @@ class Rmetaclass < Rbindable
     @metaclass_for = metaclass_for
   end
 
+  def add_template_params_scope(mut_template_types)
+  end
+
   def lookup(method_name)
     [@namespace[method_name], self]
   end
@@ -241,11 +253,15 @@ end
 
 class Rclass < Rbindable
   attr_reader :metaclass, :namespace
-  def initialize(name, parent_class)
+  def initialize(name, parent_class, template_params: [])
     @metaclass = Rmetaclass.new(name, self)
     super(name, @metaclass)
     @parent = parent_class
     @namespace = {}
+    @template_params = template_params
+  end
+
+  def add_template_params_scope(mut_template_types)
   end
 
   def lookup(method_name)
@@ -259,8 +275,56 @@ class Rclass < Rbindable
     end
   end
 
-  def define(rscopebinding)
-    @namespace[rscopebinding.name] = rscopebinding
+  def define(rscopebinding, bind_to: nil)
+    @namespace[bind_to || rscopebinding.name] = rscopebinding
+  end
+
+  def [](specialization)
+    Rconcreteclass.new(self, specialization)
+  end
+end
+
+class Rconcreteclass < Rbindable
+  attr_reader :class, :specialization
+  def initialize(_class, specialization)
+    @specialization = specialization
+    @class = _class
+  end
+
+  def new_bind
+    Rconcreteclass.new(@class, @specialization.clone)
+  end
+
+  def name
+    "#{@class.name}<#{@specialization.map {|v|v[1].name}.join(',')}>"
+  end
+
+  def add_template_params_scope(mut_template_types)
+    mut_template_types.merge!(@specialization)
+  end
+
+  def type; @class.type end
+  def lookup(method_name); @class.lookup(method_name) end
+  def define(rscopebinding); @class.define(rscopebinding) end
+  def eql?(other)
+    other.is_a?(Rconcreteclass) && other.class == @class && other.specialization == @specialization
+  end
+  def ==(other); self.eql?(other) end
+  # returns errors
+  def specialize(template_param, concrete_type)
+    t = @specialization[template_param]
+    if t.is_a?(TemplateType)
+      @specialization[template_param] = concrete_type
+      true
+    else
+      t == concrete_type
+    end
+  end
+  # specialize from template_params from another Rconcreteclass
+  def new_bind_specialize(template_param, concrete_type)
+    @specialization.each_pair { |k,v|
+      @specialization[k] = concrete_type if v == template_param
+    }
   end
 end
 
@@ -283,6 +347,9 @@ end
 
 def make_root
   robject = Rclass.new('Object', nil)
+
+  _T = TemplateType.new
+  _U = TemplateType.new
   # denny is right
   rstring  = robject.define(Rclass.new('String', robject))
   rsymbol  = robject.define(Rclass.new('Symbol', robject))
@@ -290,6 +357,8 @@ def make_root
   rinteger = robject.define(Rclass.new('Integer', robject))
   rfloat   = robject.define(Rclass.new('Float', robject))
   rboolean = robject.define(Rclass.new('Boolean', robject))
+  rarray   = robject.define(Rclass.new('Array', robject, template_params: [_T]))
+  rself    = robject.define(SelfType.new)
 
   robject.define(Rlvar.new('$0', rstring))
   robject.define(Rfunc.new('require', rnil, [rstring]))
@@ -299,6 +368,13 @@ def make_root
   robject.define(Rfunc.new('to_s', rstring, []))
   robject.define(Rfunc.new('to_f', rfloat, []))
   robject.define(Rfunc.new('to_i', rinteger, []))
+
+  rarray.metaclass.define(Rfunc.new('new', rarray[{_T => _T}], []))
+  rarray.define(Rfunc.new('push', rself, [_T]))
+  rarray.define(Rfunc.new('[]', _T, [rinteger]))
+  rarray.define(Rfunc.new('[]=', _T, [rinteger, _T]))
+  rarray.define(Rfunc.new('include?', rboolean, [_T]))
+  rarray.define(Rfunc.new('map', rarray[{_T => _U}], [], block_sig: FnSig.new(_U, [_T])))
 
   rstring.define(Rfunc.new('upcase', rstring, []))
   rstring.define(Rfunc.new('==', rboolean, [rstring]))
@@ -320,6 +396,8 @@ def make_root
   rfloat.define(Rfunc.new('>=', rboolean, [rfloat]))
   rfloat.define(Rfunc.new('<', rboolean, [rfloat]))
   rfloat.define(Rfunc.new('<=', rboolean, [rfloat]))
+
+  rboolean.define(Rfunc.new('==', rboolean, [rboolean]))
 
   robject
 end
@@ -380,7 +458,7 @@ class Context
     
     require "parser/current"
     @robject = make_root()
-    @rself = SelfType.new
+    @rself = @robject.lookup(:genericSelf)[0]
     @rnil = @robject.lookup(:nil)[0]
     @rboolean = @robject.lookup('Boolean')[0]
     @rundefined = Rundefined.new
@@ -536,7 +614,7 @@ class Context
   end
 
   def block_call(node, block, passed_args, mut_template_types)
-    type_errors = block.sig.call_typecheck?(node, '<block>', passed_args, mut_template_types, nil)
+    type_errors = block.sig.call_typecheck?(node, '<block>', passed_args, mut_template_types, nil, scope_top)
 
     if !type_errors.empty?
       @errors.concat(type_errors)
@@ -688,8 +766,7 @@ class Context
       @errors << [node, :fn_unknown, name, type_scope.name]
       return @rundefined
     elsif fn.kind_of?(Rfunc)
-      return_type = function_call(type_scope, call_scope, fn, node, arg_types, block)
-      return return_type
+      return function_call(type_scope, call_scope, fn, node, arg_types, block)
     else
       @errors << [node, :not_a_function, name]
       return @rundefined
@@ -708,7 +785,8 @@ class Context
       call_scope = call_scope.metaclass_for
     end
     template_types = { @rself => type_scope }
-    type_errors = fn.sig.call_typecheck?(node, fn.name, args, template_types, block)
+    type_scope.add_template_params_scope(template_types)
+    type_errors = fn.sig.call_typecheck?(node, fn.name, args, template_types, block, type_scope)
 
     if !type_errors.empty?
       @errors.concat(type_errors)
@@ -742,6 +820,9 @@ class Context
 
         if expected_ret.is_a?(TemplateType)
           # discover template return type
+          if type_scope.is_a?(Rconcreteclass)
+            type_scope.specialize(expected_ret, block_ret)
+          end
           template_types[expected_ret] = block_ret
         elsif expected_ret != block_ret
           # block return type mismatch
@@ -754,13 +835,21 @@ class Context
   end
 
   def to_concrete_type(type, self_type, template_types)
-    if type.is_a?(SelfType)
-      self_type
-    elsif type.is_a?(TemplateType)
-      template_types[type] || type
-    else
-      type
+    conc_type =
+      if self_type.is_a?(Rconcreteclass) && self_type.specialization[type]
+        self_type.specialization[type]
+      elsif type.is_a?(SelfType)
+        self_type
+      elsif type.is_a?(TemplateType)
+        template_types[type] || type
+      else
+        type
+      end
+    conc_type = conc_type.new_bind
+    if conc_type.is_a?(Rconcreteclass)
+      template_types.each_pair { |k,v| conc_type.new_bind_specialize(k, v) }
     end
+    conc_type
   end
 
   # define static method

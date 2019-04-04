@@ -211,6 +211,9 @@ class TestLucidCheck < Test::Unit::TestCase
   end
 
   def test_catch_parse_error
+    # eat stderr, since the ruby parser is noisy when it gets syntax errors
+    e = $stderr
+    $stderr = StringIO.new
     assert_equal(
       [[nil, :parse_error, 'unexpected token $end']],
       parse_str(
@@ -219,6 +222,8 @@ class TestLucidCheck < Test::Unit::TestCase
         RUBY
       )
     )
+    # restore stderr
+    $stderr = e
   end
 
   def test_if_statement
@@ -438,6 +443,38 @@ class TestLucidCheck < Test::Unit::TestCase
           a = a.fun2(nil) { |x| nil }
         RUBY
       ))
+    )
+  end
+
+  def test_generic_type_1_arg
+    assert_equal(
+      [[4, :fn_arg_type, '[]=', 'Integer,Integer', 'Integer,String'],
+       [7, :fn_arg_type, 'push', 'Integer', 'nil'],
+       [8, :var_type, 'a', 'Array<Integer>', 'Array<generic>'],
+       [10, :fn_arg_type, 'include?', 'Integer', 'Float'],
+       [12, :var_type, 'a', 'Array<Integer>', 'Array<Float>'],
+       [15, :fn_arg_type, 'push', 'String', 'Integer'],
+       [16, :var_type, 'c', 'Array<Float>', 'Array<String>']],
+      parse_str(
+        <<-RUBY
+          a = Array.new
+          a.push(2)
+          a[0] = 3
+          a[0] = 'hi'  # fails
+          b = a.push(3)
+          a = b
+          b.push(nil)  # fails
+          a = Array.new  # fails
+          a.include?(3)
+          a.include?(4.5)  # fails
+          c = a.map { |i| i.to_f }
+          a = c  # fails
+          d = Array.new
+          d.push('oi')
+          d.push(2)  # fails
+          c = d  #fails
+        RUBY
+      )
     )
   end
 end
