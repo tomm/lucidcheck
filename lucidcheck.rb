@@ -375,6 +375,7 @@ def make_root
   rarray.define(Rfunc.new('[]=', _T, [rinteger, _T]))
   rarray.define(Rfunc.new('include?', rboolean, [_T]))
   rarray.define(Rfunc.new('map', rarray[{_T => _U}], [], block_sig: FnSig.new(_U, [_T])))
+  rarray.define(Rfunc.new('==', rboolean, [rarray[{_T => _T}]]))
 
   rstring.define(Rfunc.new('upcase', rstring, []))
   rstring.define(Rfunc.new('==', rboolean, [rstring]))
@@ -835,21 +836,20 @@ class Context
   end
 
   def to_concrete_type(type, self_type, template_types)
-    conc_type =
-      if self_type.is_a?(Rconcreteclass) && self_type.specialization[type]
-        self_type.specialization[type]
-      elsif type.is_a?(SelfType)
-        self_type
-      elsif type.is_a?(TemplateType)
-        template_types[type] || type
-      else
-        type
+    if self_type.is_a?(Rconcreteclass) && self_type.specialization[type]
+      self_type.specialization[type]
+    elsif type.is_a?(SelfType)
+      self_type.new_bind
+    elsif type.is_a?(TemplateType)
+      (template_types[type] || type)
+    else
+      t = type
+      if t.is_a?(Rconcreteclass)
+        t = t.new_bind
+        template_types.each_pair { |k,v| t.new_bind_specialize(k, v) }
       end
-    conc_type = conc_type.new_bind
-    if conc_type.is_a?(Rconcreteclass)
-      template_types.each_pair { |k,v| conc_type.new_bind_specialize(k, v) }
+      t
     end
-    conc_type
   end
 
   # define static method

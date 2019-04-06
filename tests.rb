@@ -477,4 +477,45 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
   end
+
+  def test_generic_late_specialization
+    assert_equal(
+      [[6, :var_type, 'a', 'Array<Array<Array<generic>>>', 'Array<Array<generic>>'],
+       [8, :var_type, 'a', 'Array<Array<Array<Integer>>>', 'Array<Array<Integer>>']],
+      parse_str(
+        <<-RUBY
+          a = Array.new
+          b = Array.new
+          c = Array.new
+          a.push(b)
+          b.push(c)
+          a = a[0]  # fail
+          a[0][0].push(1)
+          a = a[0]  # fail
+        RUBY
+      )
+    )
+  end
+
+  def test_generic_non_id
+    assert_equal(
+      [[4, :fn_arg_type, '==', 'Array<generic>', 'Array<generic>'],
+       [7, :fn_arg_type, '==', 'Array<generic>', 'Array<Integer>']],
+      parse_str(
+        <<-RUBY
+          a = Array.new
+          b = Array.new
+          a == a
+          a == b  # fail
+          
+          b.push(1)
+          a == b  # fail
+          
+          a.push(1)
+          a == b
+          a == a
+        RUBY
+      )
+    )
+  end
 end
