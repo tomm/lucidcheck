@@ -536,4 +536,63 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
   end
+
+  def test_no_block_given
+    assert_equal(
+      [[6, :no_block_given],
+       [8, :block_arg_num, 'new', 2, 1],
+       [9, :no_block_given]],
+      parse_str(
+        <<-RUBY
+          class A
+            def initialize(x, y)
+              @a = yield(x, y)
+            end
+          end
+          a = A.new(1,2)  # fail
+          c = A.new(1,2) {|x, y| x + y}
+          d = A.new(1,2) {|x| x}  # fail
+          e = A.new(1,2)  # fail
+        RUBY
+      )
+    )
+  end
+
+  def test_super_type_check
+    assert_equal(
+      [[21, :no_block_given],
+       [24, :no_block_given],
+       [17, :fn_arg_num, 'new', 2, 0]],
+      parse_str(
+        <<-RUBY
+          class A
+            def initialize(x, y)
+              @sum = x + y
+              yield(x,y)
+            end
+            def sum; @sum end
+          end
+
+          class B < A
+            def initialize(x, y)
+              super(x, y)
+            end
+          end
+
+          class C < B
+            def initialize()
+              super  # fail
+            end
+          end
+
+          a = A.new(1,2)  # fail
+          a = A.new(1,2) {|a,b| p [a,b]}
+          p a.sum
+          b = B.new(2,3)  # fail
+          p b.sum
+          c = C.new
+        RUBY
+      )
+    )
+  end
 end
