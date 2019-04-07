@@ -283,7 +283,11 @@ class Rclass < Rbindable
   end
 
   def [](specialization)
-    Rconcreteclass.new(self, specialization)
+    Rconcreteclass.new(self, @template_params.zip(specialization).to_h)
+  end
+
+  def new_generic_specialization
+    self[@template_params]
   end
 end
 
@@ -370,6 +374,8 @@ def make_root
   rarray   = robject.define(Rclass.new('Array', robject, template_params: [_T]))
   rself    = robject.define(SelfType.new)
 
+  robject.define(Rconst.new('ARGV', rarray[[rstring]]))
+
   robject.define(Rlvar.new('$0', rstring))
   robject.define(Rfunc.new('require', rnil, [rstring]))
   robject.define(Rfunc.new('puts', rnil, [rstring]))
@@ -379,12 +385,14 @@ def make_root
   robject.define(Rfunc.new('to_f', rfloat, []))
   robject.define(Rfunc.new('to_i', rinteger, []))
 
-  rarray.metaclass.define(Rfunc.new('new', rarray[{_T => _T}], []))
+  rarray.metaclass.define(Rfunc.new('new', rarray[[_T]], []))
+  rarray.define(Rfunc.new('length', rinteger, []))
   rarray.define(Rfunc.new('push', rself, [_T]))
   rarray.define(Rfunc.new('[]', _T, [rinteger]))
   rarray.define(Rfunc.new('[]=', _T, [rinteger, _T]))
   rarray.define(Rfunc.new('include?', rboolean, [_T]))
-  rarray.define(Rfunc.new('map', rarray[{_T => _U}], [], block_sig: FnSig.new(_U, [_T])))
+  rarray.define(Rfunc.new('map', rarray[[_U]], [], block_sig: FnSig.new(_U, [_T])))
+  rarray.define(Rfunc.new('each', rarray[[_T]], [], block_sig: FnSig.new(_U, [_T])))
   rarray.define(Rfunc.new('==', rboolean, [rself]))
 
   rstring.define(Rfunc.new('upcase', rstring, []))
@@ -451,6 +459,8 @@ class Context
         "Function '#{e[2]}' expected a block with #{e[3]} arguments, but passed block with #{e[4]} arguments"
       when :var_type
         "Cannot reassign variable '#{e[2]}' of type #{e[3]} with value of type #{e[4]}"
+      when :array_mixed_types
+        "Mixed types not permitted in array literal."
       when :inference_failed
         "Cannot infer type. Annotation needed."
       when :const_redef
@@ -472,6 +482,7 @@ class Context
     @rself = @robject.lookup(:genericSelf)[0]
     @rnil = @robject.lookup(:nil)[0]
     @rboolean = @robject.lookup('Boolean')[0]
+    @rarray = @robject.lookup('Array')[0]
     @rundefined = Rundefined.new
     @scope = [@robject]
     @callstack = [FnScope.new(@robject, nil, nil)]
@@ -609,6 +620,8 @@ class Context
       type_lookup!(node, @robject, 'Boolean')
     when :sym
       type_lookup!(node, @robject, 'Symbol')
+    when :array
+      n_array_literal(node)
     when :yield
       n_yield(node)
     when :const
@@ -648,6 +661,22 @@ class Context
     args = node.children.map {|n| n_expr(n) }
     block = callstack_top.passed_block
     block_call(node, block, args, {})
+  end
+
+  def n_array_literal(node)
+    if node.children == nil || node.children.length == 0
+      @rarray.new_generic_specialization
+    else
+      contents = node.children.map {|n| n_expr(n) }
+
+      fst_type = contents.first
+      if contents.map {|v| v == fst_type }.all?
+        @rarray[[fst_type]]
+      else
+        @errors << [node, :array_mixed_types]
+        @rundefined
+      end
+    end
   end
 
   def n_class(node)

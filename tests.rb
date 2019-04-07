@@ -518,4 +518,22 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
   end
+
+  def test_array_literal
+    assert_equal(
+      [[4, :array_mixed_types],
+       [5, :fn_arg_type, '==', 'Array<generic>', 'Array<String>']],
+      parse_str(
+        <<-RUBY
+          a = []
+          b = [1,2,3]
+          c = ['hello', 'dude']
+          d = ['bad', 2]  # fail
+          a == c  # fail
+          a.push('hi')
+          a == c
+        RUBY
+      )
+    )
+  end
 end
