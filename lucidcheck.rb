@@ -115,7 +115,10 @@ class FnSig
         end
       else
         # normal arg
-        if def_type != passed
+        if (def_type.is_a?(SelfType) && passed == self_type) ||
+           (!def_type.is_a?(SelfType) && passed == def_type)
+          # type check passed
+        else
           return [function_call_type_error(node, fn_name, passed_args, mut_template_types)]
         end
       end
@@ -169,7 +172,7 @@ class Rbindable
     @name
   end
 
-  def new_bind
+  def new_inst
     self
   end
 end
@@ -291,7 +294,7 @@ class Rconcreteclass < Rbindable
     @class = _class
   end
 
-  def new_bind
+  def new_inst
     Rconcreteclass.new(@class, @specialization.clone)
   end
 
@@ -303,11 +306,18 @@ class Rconcreteclass < Rbindable
     mut_template_types.merge!(@specialization)
   end
 
+  def is_fully_specialized?
+    !@specialization.map {|kv| kv[1].is_a?(TemplateType)}.any?
+  end
   def type; @class.type end
   def lookup(method_name); @class.lookup(method_name) end
   def define(rscopebinding); @class.define(rscopebinding) end
   def eql?(other)
-    other.is_a?(Rconcreteclass) && other.class == @class && other.specialization == @specialization
+    if is_fully_specialized?
+      @class == other.class && @specialization == other.specialization
+    else
+      self.equal?(other)
+    end
   end
   def ==(other); self.eql?(other) end
   # returns errors
@@ -321,7 +331,7 @@ class Rconcreteclass < Rbindable
     end
   end
   # specialize from template_params from another Rconcreteclass
-  def new_bind_specialize(template_param, concrete_type)
+  def new_inst_specialize(template_param, concrete_type)
     @specialization.each_pair { |k,v|
       @specialization[k] = concrete_type if v == template_param
     }
@@ -375,7 +385,7 @@ def make_root
   rarray.define(Rfunc.new('[]=', _T, [rinteger, _T]))
   rarray.define(Rfunc.new('include?', rboolean, [_T]))
   rarray.define(Rfunc.new('map', rarray[{_T => _U}], [], block_sig: FnSig.new(_U, [_T])))
-  rarray.define(Rfunc.new('==', rboolean, [rarray[{_T => _T}]]))
+  rarray.define(Rfunc.new('==', rboolean, [rself]))
 
   rstring.define(Rfunc.new('upcase', rstring, []))
   rstring.define(Rfunc.new('==', rboolean, [rstring]))
@@ -837,16 +847,17 @@ class Context
 
   def to_concrete_type(type, self_type, template_types)
     if self_type.is_a?(Rconcreteclass) && self_type.specialization[type]
+      # a generic type param of the self type
       self_type.specialization[type]
     elsif type.is_a?(SelfType)
-      self_type.new_bind
+      self_type
     elsif type.is_a?(TemplateType)
       (template_types[type] || type)
     else
       t = type
       if t.is_a?(Rconcreteclass)
-        t = t.new_bind
-        template_types.each_pair { |k,v| t.new_bind_specialize(k, v) }
+        t = t.new_inst
+        template_types.each_pair { |k,v| t.new_inst_specialize(k, v) }
       end
       t
     end
@@ -896,7 +907,7 @@ end
 
 if __FILE__ == $0
   if ARGV.length < 1 then
-    puts "Usage: ./turbocop.rb file1.rb file2.rb etc..."
+    puts "Usage: lucidcheck file1.rb file2.rb etc..."
   end
 
   if ARGV == ['--version']
