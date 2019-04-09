@@ -17,13 +17,18 @@ end
 class FnScope
   attr_reader :passed_block, :is_constructor, :caller_node, :in_class
   #: fn(Rmetaclass | Rclass, Rblock | nil)
-  def initialize(caller_node, in_class, parent_scope, passed_block, is_constructor: false)
+  def initialize(caller_node, fn_body_node, in_class, parent_scope, passed_block, is_constructor: false)
     @in_class = in_class
     @local_scope = {}
     @parent_scope = parent_scope
     @passed_block = passed_block
     @is_constructor = is_constructor
     @caller_node = caller_node
+    @fn_body_node = fn_body_node
+  end
+
+  def is_fn_body_node_in_stack(node)
+    @fn_body_node.equal?(node) || @parent_scope && @parent_scope.is_fn_body_node_in_stack(node)
   end
 
   def lookup_super
@@ -198,6 +203,12 @@ end
 class Rundefined < Rbindable
   def initialize
     super(:undefined, nil)
+  end
+end
+
+class Rrecursion < Rbindable
+  def initialize
+    super(:recursion, nil)
   end
 end
 
@@ -520,7 +531,7 @@ class Context
     @rhash = @robject.lookup('Hash')[0]
     @rundefined = Rundefined.new
     @scope = [@robject]
-    @callstack = [FnScope.new(nil, @robject, nil, nil)]
+    @callstack = [FnScope.new(nil, nil, @robject, nil, nil)]
     @errors = []
   end
 
@@ -709,7 +720,7 @@ class Context
         return @rundefined
       end
 
-      function_scope = FnScope.new(node, scope_top, block.fn_scope, nil)
+      function_scope = FnScope.new(node, block.body_node, scope_top, block.fn_scope, nil)
       # define lvars from arguments
       block.sig.args.each { |a| function_scope.define(Rlvar.new(a[0], a[1])) }
 
@@ -928,15 +939,20 @@ class Context
     elsif fn.block_sig && block.sig.args.length != fn.block_sig.args.length
       @errors << [callstack_top.caller_node || node, :block_arg_num, fn.name, fn.block_sig.args.length, block.sig.args.length]
     elsif fn.body != nil # means not a purely 'header' function def (ie ruby standard lib type stubs)
-      function_scope = FnScope.new(node, call_scope, nil, block, is_constructor: fn.is_constructor)
+      function_scope = FnScope.new(node, fn.body, call_scope, nil, block, is_constructor: fn.is_constructor)
       # define lvars from arguments
       fn.sig.args.each { |a| function_scope.define(Rlvar.new(a[0], a[1])) }
 
-      # find function return type by evaluating body with concrete argument types in scope
-      push_callstack(function_scope)
-      ret = n_expr(fn.body)
-      fn.return_type = ret unless fn.is_constructor
-      pop_callstack()
+      if callstack_top.is_fn_body_node_in_stack(fn.body)
+        # never actually recurse! we want this bastible to finish
+        fn.return_type = Rrecursion.new
+      else
+        # find function return type by evaluating body with concrete argument types in scope
+        push_callstack(function_scope)
+        ret = n_expr(fn.body)
+        fn.return_type = ret unless fn.is_constructor
+        pop_callstack()
+      end
 
       if block
         if fn.block_sig && !fn.block_sig.structural_eql?(block.sig, template_types)
