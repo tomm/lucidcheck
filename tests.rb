@@ -228,7 +228,7 @@ class TestLucidCheck < Test::Unit::TestCase
 
   def test_if_statement
     assert_equal(
-      [[4, :if_not_boolean, 'Integer']],
+      [[4, :expected_boolean, 'Integer']],
       parse_str(
         <<-RUBY
           x = 2
@@ -591,6 +591,44 @@ class TestLucidCheck < Test::Unit::TestCase
           b = B.new(2,3)  # fail
           p b.sum
           c = C.new
+        RUBY
+      )
+    )
+  end
+
+  def test_logic_op
+    assert_equal(
+      [[2, :expected_boolean, 'Integer'],
+       [3, :expected_boolean, 'Integer']],
+      parse_str(
+        <<-RUBY
+          a = true && true || false
+          a = true || 1
+          a = 1 || !!1
+        RUBY
+      )
+    )
+  end
+
+  def test_dict
+    assert_equal(
+      [[2, :var_type, 'a', 'Hash<generic,generic>', 'Integer'],
+       [4, :fn_arg_type, '[]=', 'Symbol,Integer', 'String,Boolean'],
+       [6, :var_type, 'b', 'Hash<generic,generic>', 'Boolean'],
+       [8, :fn_arg_type, '[]=', 'Symbol,Integer', 'String,Float'],
+       [9, :hash_mixed_types],
+      ],
+      parse_str(
+        <<-RUBY
+          a = Hash.new
+          a = 1
+          a[:hi] = 2
+          a['hi'] = true
+          b = {}
+          b = false
+          c = {:a => 1, b: 2}
+          c['c'] = 3.0
+          d = {:a => 1, 'b' => 2}
         RUBY
       )
     )

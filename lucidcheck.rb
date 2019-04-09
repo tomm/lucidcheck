@@ -205,6 +205,10 @@ class TemplateType < Rbindable
   def initialize
     super(:generic, nil)
   end
+
+  def lookup(name)
+    [nil, nil]
+  end
 end
 
 class SelfType < Rbindable
@@ -379,6 +383,8 @@ end
 def make_root
   robject = Rclass.new('Object', nil)
 
+  _K = TemplateType.new
+  _V = TemplateType.new
   _T = TemplateType.new
   _U = TemplateType.new
   # denny is right
@@ -389,11 +395,13 @@ def make_root
   rfloat   = robject.define(Rclass.new('Float', robject))
   rboolean = robject.define(Rclass.new('Boolean', robject))
   rarray   = robject.define(Rclass.new('Array', robject, template_params: [_T]))
+  rhash    = robject.define(Rclass.new('Hash', robject, template_params: [_K, _V]))
   rself    = robject.define(SelfType.new)
 
   robject.define(Rconst.new('ARGV', rarray[[rstring]]))
 
   robject.define(Rlvar.new('$0', rstring))
+  robject.define(Rfunc.new('!', rboolean, []))
   robject.define(Rfunc.new('require', rnil, [rstring]))
   robject.define(Rfunc.new('puts', rnil, [rstring]))
   robject.define(Rfunc.new('p', _T, [_T]))
@@ -402,6 +410,10 @@ def make_root
   robject.define(Rfunc.new('to_s', rstring, []))
   robject.define(Rfunc.new('to_f', rfloat, []))
   robject.define(Rfunc.new('to_i', rinteger, []))
+
+  rhash.metaclass.define(Rfunc.new('new', rhash[[_K, _V]], []))
+  rhash.define(Rfunc.new('[]=', _V, [_K, _V]))
+  rhash.define(Rfunc.new('[]', _V, [_K]))
 
   rarray.metaclass.define(Rfunc.new('new', rarray[[_T]], []))
   rarray.define(Rfunc.new('length', rinteger, []))
@@ -463,8 +475,8 @@ class Context
         "Instance variable '#{e[2]}' not found in this scope"
       when :gvar_unknown
         "Global variable '#{e[2]}' not found"
-      when :if_not_boolean
-        "if clause requires a boolean value, but #{e[2]} found"
+      when :expected_boolean
+        "expected a boolean value, but #{e[2]} found"
       when :fn_inference_fail
         "Could not infer type of function '#{e[2]}'. Add a type annotation (not yet supported ;)"
       when :fn_arg_num
@@ -479,6 +491,8 @@ class Context
         "Cannot reassign variable '#{e[2]}' of type #{e[3]} with value of type #{e[4]}"
       when :array_mixed_types
         "Mixed types not permitted in array literal."
+      when :hash_mixed_types
+        "Mixed types not permitted in hash literal."
       when :inference_failed
         "Cannot infer type. Annotation needed."
       when :const_redef
@@ -503,6 +517,7 @@ class Context
     @rnil = @robject.lookup(:nil)[0]
     @rboolean = @robject.lookup('Boolean')[0]
     @rarray = @robject.lookup('Array')[0]
+    @rhash = @robject.lookup('Hash')[0]
     @rundefined = Rundefined.new
     @scope = [@robject]
     @callstack = [FnScope.new(nil, @robject, nil, nil)]
@@ -576,6 +591,8 @@ class Context
       n_def(node)
     when :defs # define static method
       n_defs(node)
+    when :self
+      callstack_top.in_class
     when :gvar
       gvar = @robject.lookup(node.children[0].to_s)[0]
       if gvar == nil
@@ -600,6 +617,10 @@ class Context
       else
         lvar.type
       end
+    when :and
+      n_logic_op(node)
+    when :or
+      n_logic_op(node)
     when :send
       n_send(node)
     when :ivasgn
@@ -618,7 +639,7 @@ class Context
       type2 = n_expr(node.children[2])
 
       if cond != @rboolean
-        @errors << [node, :if_not_boolean, cond.name]
+        @errors << [node, :expected_boolean, cond.name]
       end
       if type1 == type2
         type1
@@ -642,6 +663,8 @@ class Context
       type_lookup!(node, @robject, 'Symbol')
     when :array
       n_array_literal(node)
+    when :hash
+      n_hash_literal(node)
     when :yield
       n_yield(node)
     when :super
@@ -657,8 +680,21 @@ class Context
         @rundefined
       end
     else
-      raise "Unexpected #{node} at line #{node.loc.line}"
+      #binding.pry
+      raise "Unknown AST node type #{node.type}: #{node} at line #{node.loc.line}"
     end
+  end
+
+  def n_logic_op(node)
+    left = n_expr(node.children[0])
+    right = n_expr(node.children[1])
+    if left != @rboolean
+      @errors << [node.children[0], :expected_boolean, left.name]
+    end
+    if right != @rboolean
+      @errors << [node.children[1], :expected_boolean, right.name]
+    end
+    @rboolean
   end
 
   def block_call(node, block, passed_args, mut_template_types)
@@ -701,6 +737,23 @@ class Context
   def n_zsuper(node)
     fn, call_scope = callstack_top.lookup_super
     function_call(callstack_top.in_class, call_scope, fn, node, [], callstack_top.passed_block)
+  end
+
+  def n_hash_literal(node)
+    if node.children == nil || node.children.length == 0
+      @rhash.new_generic_specialization
+    else
+      contents = node.children.map {|n| [n_expr(n.children[0]),
+                                         n_expr(n.children[1])] }
+
+      fst_type = contents.first
+      if contents.map {|v| v == fst_type }.all?
+        @rhash[fst_type]
+      else
+        @errors << [node, :hash_mixed_types]
+        @rundefined
+      end
+    end
   end
 
   def n_array_literal(node)
@@ -768,7 +821,7 @@ class Context
     name = node.children[0].to_s
     type = n_expr(node.children[1])
 
-    if type == @rundefined
+    if type.is_a?(Rundefined)
       # error already reported. do nothing
     elsif callstack_top.lookup(name)[0] == nil
       if callstack_top.is_constructor == false
@@ -789,7 +842,7 @@ class Context
 
     rbinding, _ = callstack_top.lookup(name)
 
-    if type == @rundefined
+    if type.is_a?(Rundefined)
       # error already reported. do nothing
     elsif rbinding == nil
       callstack_top.define(Rlvar.new(name, type))
