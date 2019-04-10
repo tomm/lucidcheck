@@ -817,4 +817,59 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
   end
+
+  def test_case_match
+    assert_equal(
+      [[10, :var_type, 'a', 'String | nil', 'Symbol']],
+      parse_str(
+        <<-RUBY
+          def f(x)
+            case x
+            when 0
+              'hi'
+            when 1
+              'oi'
+            end
+          end
+          a = f(1)
+          a = :hi
+        RUBY
+      )
+    )
+    assert_equal(
+      [[12, :var_type, 'a', 'String | Integer', 'Symbol']],
+      parse_str(
+        <<-RUBY
+          def f(x)
+            case x
+            when 0
+              'hi'
+            when 1
+              'oi'
+            else
+              123
+            end
+          end
+          a = f(1)
+          a = :hi
+        RUBY
+      )
+    )
+    assert_equal(
+      [[5, :match_type, 'Integer', 'String']],
+      parse_str(
+        <<-RUBY
+          def f(x)
+            case x
+            when 0
+              'hi'
+            when 'foo'  # fail
+              'oi'
+            end
+          end
+          f(1)
+        RUBY
+      )
+    )
+  end
 end

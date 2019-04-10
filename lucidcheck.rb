@@ -550,6 +550,7 @@ def make_root
   rarray.define(Rfunc.new('==', rboolean, [rself]))
 
   rstring.define(Rfunc.new('upcase', rstring, []))
+  rstring.define(Rfunc.new('+', rstring, [rstring]))
   rstring.define(Rfunc.new('==', rboolean, [rstring]))
 
   rinteger.define(Rfunc.new('+', rinteger, [rinteger]))
@@ -613,6 +614,8 @@ class Context
         "Function '#{e[2]}' takes a block of type '#{e[3]}' but is passed '#{e[4]}'"
       when :block_arg_num
         "Function '#{e[2]}' expected a block with #{e[3]} arguments, but passed block with #{e[4]} arguments"
+      when :match_type
+        "Expected '#{e[2]}' in when clause, but found '#{e[3]}"
       when :var_type
         "Cannot reassign variable '#{e[2]}' of type #{e[3]} with value of type #{e[4]}"
       when :array_mixed_types
@@ -721,6 +724,7 @@ class Context
   def n_expr(node)
     case node&.type
     when nil
+      @rnil
     when :nil
       @rnil
     when :begin
@@ -810,6 +814,8 @@ class Context
       n_ensure(node)
     when :irange
       n_irange(node)
+    when :case
+      n_case(node)
     when :const
       c = scope_top.lookup(node.children[1].to_s)[0]
       if c
@@ -820,6 +826,28 @@ class Context
       end
     else
       raise "Line #{node.loc.line}: unknown AST node type #{node.type}:\r\n#{node}"
+    end
+  end
+
+  def n_case(node)
+    needle = n_expr(node.children[0])
+    whens = node.children.drop(1)
+      .take_while { |n| n&.type == :when }
+      .map { |n|
+        _case_type = n_expr(n.children[0])
+        if _case_type != needle
+          @errors << [n.children[0], :match_type, needle.to_s, _case_type.to_s]
+        end
+        n_expr(n.children[1])
+      }
+    # catch-all (else)
+    whens << n_expr(node.children.last)
+    whens.uniq!
+
+    if whens.length == 1
+      whens.first
+    else
+      Rsumtype.new(whens)
     end
   end
 
@@ -890,7 +918,7 @@ class Context
     _resbody = n_expr(node.children[1])
     _else = n_expr(node.children[2])
 
-    if _else == nil
+    if _else == @rnil
       if _resbody == _begin
         _resbody
       else
@@ -1069,6 +1097,8 @@ class Context
     else
       # binding already existed. types match. cool
     end
+    
+    type
   end
 
   def n_lvasgn(node)
@@ -1084,6 +1114,8 @@ class Context
     elsif rbinding.type != type
       @errors << [node, :var_type, name, rbinding.type.name, type.name]
     end
+
+    type
   end
 
   def n_casgn(node)
@@ -1097,6 +1129,8 @@ class Context
     else
       @errors << [node, :const_redef, name]
     end
+
+    type
   end
 
   def n_block(node)
