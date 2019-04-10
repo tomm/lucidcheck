@@ -101,7 +101,7 @@ end
 
 class FnScope
   attr_reader :passed_block, :is_constructor, :caller_node, :in_class
-  #: fn(Rmetaclass | Rclass, Rblock | nil)
+  ##: fn(Rmetaclass | Rclass, Rblock | nil)
   def initialize(caller_node, fn_body_node, in_class, parent_scope, passed_block, is_constructor: false)
     @in_class = in_class
     @local_scope = {}
@@ -124,7 +124,7 @@ class FnScope
     end
   end
 
-  #: fn(String) > [Rbindable, Rbindable]
+  ##: fn(String) > [Rbindable, Rbindable]
   # returns       [object, scope]
   def lookup(name)
     r = [@local_scope[name], @in_class]
@@ -151,13 +151,13 @@ class FnSig
     add_anon_args(anon_args)
   end
 
-  #: fn(Array[Rbindable])
+  ##: fn(Array[Rbindable])
   def add_anon_args(args)
     args.each { |a| @args << [nil, a] }
   end
 
   # named as in def my_func(x, y, z). ie not keyword args
-  #: fn(Array[[String, Rbindable]])
+  ##: fn(Array[[String, Rbindable]])
   def add_named_args(args)
     @args.concat(args)
   end
@@ -176,7 +176,7 @@ class FnSig
     @args.map{ |a| template_types[a[1]] || a[1] }
   end
 
-  #: fn(FnSig)
+  ##: fn(FnSig)
   def structural_eql?(other_sig, template_types = {})
     ret = template_types[@return_type] || @return_type
     args_match = other_sig.args.map { |v|
@@ -185,7 +185,7 @@ class FnSig
     return (ret == other_sig.return_type) && args_match
   end
 
-  #: fn(Array[Rbindable]) > Array[error]
+  ##: fn(Array[Rbindable]) > Array[error]
   def call_typecheck?(node, fn_name, passed_args, mut_template_types, block, self_type)
 
     if passed_args.map { |a| a == nil }.any?
@@ -253,7 +253,7 @@ class FnSig
 
   private
 
-  #: fn() > Array[error]
+  ##: fn() > Array[error]
   def function_call_type_error(node, fn_name, passed_args, template_types)
     [node, :fn_arg_type, fn_name, args_to_s(template_types), passed_args.map(&:name).join(',')]
   end
@@ -302,6 +302,10 @@ class Rrecursion < Rbindable
   def initialize
     super(:unannotated_recursive_function, nil)
   end
+
+  def lookup(name)
+    [nil, nil]
+  end
 end
 
 class TemplateType < Rbindable
@@ -330,7 +334,7 @@ class Rfunc < Rbindable
   attr_accessor :node, :body, :sig, :block_sig
   attr_reader :is_constructor
 
-  #: fn(String, Rbindable, Array[Rbindable])
+  ##: fn(String, Rbindable, Array[Rbindable])
   def initialize(name, return_type, anon_args = [], is_constructor: false, block_sig: nil)
     super(name, nil)
     @sig = FnSig.new(return_type, anon_args)
@@ -344,7 +348,7 @@ class Rfunc < Rbindable
   end
 
   # named as in def my_func(x, y, z). ie not keyword args
-  #: fn(Array[[String, Rbindable]])
+  ##: fn(Array[[String, Rbindable]])
   def add_named_args(arg_name_type)
     @sig.add_named_args(arg_name_type)
   end
@@ -468,7 +472,7 @@ end
 
 class Rsumtype < Rbindable
   attr_reader :options
-  #: fn(Array[Rbindable])
+  ##: fn(Array[Rbindable])
   def initialize(types)
     super(types.map(&:to_s).join(' | '), nil)
     @options = types
@@ -688,12 +692,12 @@ class Context
     @callstack.pop
   end
 
-  #: fn(FnScope)
+  ##: fn(FnScope)
   def push_callstack(fnscope)
     @callstack.push(fnscope)
   end
 
-  #: returns type
+  ##: returns type
   def n_expr(node)
     case node&.type
     when nil
