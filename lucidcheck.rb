@@ -1,15 +1,100 @@
 #!/usr/bin/env ruby
 require 'pry'
-require 'set'
+require 'ripper'
 
-# type annotation formats that could be parsed with ruby parser:
+# type annotation examples:
 # String | Integer
-# fn(Integer,String) > String
-# fn(fn() > String)
-# Array[Integer]
+# fn(Integer,String) -> String
+# fn(fn() -> String)
+# Array<Integer>
 # [Integer, String, Boolean]
-# fn[T].(T,T) > T
-# fn[T,U].(fn(T) > U, Array[T]) > Array[U]
+# fn<T>(T,T) -> T
+# fn<T,U>(fn(T) -> U, Array<T>) -> Array<U>
+class AnnotationParser
+  def initialize(tokens, lookup)
+    @tokens = tokens
+    @lookup = lookup
+  end
+
+  def self.tokenize(str)
+    tokens = []
+    pos = 0
+    identifier_regex = /^[A-Za-z]+[!\?]?/
+
+    while pos < str.length do
+      c = str.slice(pos)
+
+      if c == " " || c == "\t"
+        # eat whitespace
+        pos += 1
+      elsif c == "-" && str.slice(pos + 1) == '>'
+        # return type
+        tokens << '->'
+        pos += 2
+      elsif (m = identifier_regex.match(str.slice(pos, str.length)))
+        # identifier
+        tokens << m[0]
+        pos += m[0].length
+      else
+        tokens << c
+        pos += 1
+      end
+    end
+    tokens
+  end
+
+  def get_type
+    type = parse_type
+    if !@tokens.empty?
+      raise CheckerBug, "malformed annotation"
+    end
+    type
+  end
+
+  private
+
+  def parse_type
+    if has 'fn'
+      eat
+      expect! '('
+      args = []
+      loop {
+        args.push(parse_type) if !has ')'
+        if has(',') then eat else break end
+      }
+      expect! ')'
+      if has '->'
+        eat
+        return_type = parse_type
+      else
+        return_type = @lookup.(:nil)[0]
+      end
+
+      Rfunc.new(nil, return_type, args)
+
+    else
+      @lookup.(eat)[0]
+    end
+  end
+
+  def eat
+    v = @tokens.first
+    @tokens = @tokens.drop(1)
+    v
+  end
+
+  def has(val)
+    @tokens.first == val
+  end
+
+  def expect!(val)
+    if !has(val)
+      raise CheckerBug, "expected #{val} but found #{@tokens.first} in type annotation on line ??"
+    else
+      eat
+    end
+  end
+end
 
 class CheckerBug < RuntimeError
 end
@@ -75,6 +160,12 @@ class FnSig
   #: fn(Array[[String, Rbindable]])
   def add_named_args(args)
     @args.concat(args)
+  end
+
+  def name_anon_args(names)
+    names.each_index { |i|
+      @args[i][0] = names[i]
+    }
   end
 
   def type_unknown?
@@ -181,7 +272,8 @@ end
 
 # Something you can assign to a variable
 class Rbindable
-  attr_reader :name, :type
+  attr_accessor :name
+  attr_reader :type
   def initialize(name, type)
     @name = name
     @type = type
@@ -208,7 +300,7 @@ end
 
 class Rrecursion < Rbindable
   def initialize
-    super(:recursion, nil)
+    super(:unannotated_recursive_function, nil)
   end
 end
 
@@ -489,11 +581,13 @@ class Context
       when :expected_boolean
         "expected a boolean value, but #{e[2]} found"
       when :fn_inference_fail
-        "Could not infer type of function '#{e[2]}'. Add a type annotation (not yet supported ;)"
+        "Could not infer type of function '#{e[2]}'. Add a type annotation"
       when :fn_arg_num
         "Function '#{e[2]}' expected #{e[3]} arguments but found #{e[4]}"
       when :fn_arg_type
         "Function '#{e[2]}' arguments have inferred type (#{e[3]}) but is passed (#{e[4]})"
+      when :fn_return_type
+        "Function '#{e[2]}' has inferred return type '#{e[3]}', but returns '#{e[4]}'"
       when :block_arg_type
         "Function '#{e[2]}' takes a block of type '#{e[3]}' but is passed '#{e[4]}'"
       when :block_arg_num
@@ -512,6 +606,8 @@ class Context
         "No block given"
       when :parse_error
         "Parse error: #{e[2]}"
+      when :annotation_error
+        e[2]
       else
         e.to_s
       end
@@ -533,11 +629,20 @@ class Context
     @scope = [@robject]
     @callstack = [FnScope.new(nil, nil, @robject, nil, nil)]
     @errors = []
+    @annotations = {}
   end
 
   def check(source)
     @errors = []
     begin
+      lines = source.split("\n")
+      @annotations = (1..lines.length).to_a.zip(lines).select { |item|
+        item[1].strip.slice(0, 3) == '#: '
+      }.map { |i|
+        annotation = i[1].strip.slice(3, i[1].length)  # strip '#: '
+        tokens = AnnotationParser.tokenize(annotation)
+        [i[0], tokens]
+      }.to_h
       ast = Parser::CurrentRuby.parse(source)
     rescue StandardError => e
       # XXX todo - get line number
@@ -945,12 +1050,20 @@ class Context
 
       if callstack_top.is_fn_body_node_in_stack(fn.body)
         # never actually recurse! we want this bastible to finish
-        fn.return_type = Rrecursion.new
+        if fn.return_type == nil
+          fn.return_type = Rrecursion.new
+        end
       else
         # find function return type by evaluating body with concrete argument types in scope
         push_callstack(function_scope)
         ret = n_expr(fn.body)
-        fn.return_type = ret unless fn.is_constructor
+        if !fn.is_constructor
+          if fn.return_type == nil
+            fn.return_type = ret
+          elsif fn.return_type != ret && !fn.return_type.is_a?(Rundefined)
+            @errors << [node, :fn_return_type, fn.name, fn.return_type.name, ret.name]
+          end
+        end
         pop_callstack()
       end
 
@@ -982,7 +1095,9 @@ class Context
       end
     end
 
-    to_concrete_type(fn.return_type, type_scope, template_types)
+    # fn.return_type can be nil if type inference has not happened yet
+    # XXX but how can that still be the case here?
+    to_concrete_type(fn.return_type || @rundefined, type_scope, template_types)
   end
 
   def to_concrete_type(type, self_type, template_types)
@@ -1011,9 +1126,20 @@ class Context
     name = node.children[1].to_s
     # [ [name, type], ... ]
     arg_name_type = node.children[2].to_a.map{|x| [x.children[0].to_s, nil] }
-    # don't know types of arguments or return type yet
-    fn = Rfunc.new(name, @rundefined)
-    fn.add_named_args(arg_name_type)
+
+    if (annot = @annotations[node.loc.line-1])
+      fn = AnnotationParser.new(annot, callstack_top.method(:lookup)).get_type
+      fn.name = name
+      if arg_name_type.length != fn.sig.args.length
+        @errors << [node, :annotation_error, "Number of arguments (#{arg_name_type.length}) does not match annotation (#{fn.sig.args.length})"]
+      else
+        fn.sig.name_anon_args(arg_name_type.map { |nt| nt[0] })
+      end
+    else
+      # don't know types of arguments or return type yet
+      fn = Rfunc.new(name, @rundefined)
+      fn.add_named_args(arg_name_type)
+    end
     fn.node = node
     fn.body = node.children[3]
     if fn.body == nil then fn.return_type = @rnil end
@@ -1024,8 +1150,20 @@ class Context
     name = node.children[0].to_s
     # [ [name, type], ... ]
     arg_name_type = node.children[1].to_a.map{|x| [x.children[0].to_s, nil] }
+
+    if (annot = @annotations[node.loc.line-1])
+      puts "Annotation for #{name} is #{annot}"
+      anot_type = AnnotationParser.new(annot, callstack_top.method(:lookup)).get_type
+      puts "Annotated type is #{anot_type.sig}"
+    else
+      anot_type = nil
+    end
+
     # define function with no known argument types (so far)
     if name == 'initialize'
+      if anot_type
+        @errors << [node, :annotation_error, "Annotations not (yet) supported on constructors"]
+      end
       # assume return type for 'new' method
       fn = Rfunc.new('new', scope_top, is_constructor: true)
       fn.add_named_args(arg_name_type)
@@ -1033,9 +1171,19 @@ class Context
       fn.body = node.children[2]
       scope_top.metaclass.define(fn)
     else
-      # don't know types of arguments or return type yet
-      fn = Rfunc.new(name, @rundefined)
-      fn.add_named_args(arg_name_type)
+      if anot_type
+        fn = anot_type
+        fn.name = name
+        if arg_name_type.length != anot_type.sig.args.length
+          @errors << [node, :annotation_error, "Number of arguments (#{arg_name_type.length}) does not match annotation (#{anot_type.sig.args.length})"]
+        else
+          fn.sig.name_anon_args(arg_name_type.map { |nt| nt[0] })
+        end
+      else
+        # don't know types of arguments or return type yet
+        fn = Rfunc.new(name, nil)
+        fn.add_named_args(arg_name_type)
+      end
       fn.node = node
       fn.body = node.children[2]
       # can assume return type of nil if body is empty

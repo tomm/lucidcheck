@@ -256,7 +256,8 @@ class TestLucidCheck < Test::Unit::TestCase
 
   def test_block_return_type
     assert_equal(
-      [[6, :block_arg_type, 'squared', '() > Integer', '() > Float'],
+      [[6, :fn_return_type, 'squared', 'Integer', 'Float'],
+       [6, :block_arg_type, 'squared', '() > Integer', '() > Float'],
        [7, :fn_arg_type, '*', 'Integer', 'Float']],
       parse_str(
         <<-RUBY
@@ -629,6 +630,71 @@ class TestLucidCheck < Test::Unit::TestCase
           c = {:a => 1, b: 2}
           c['c'] = 3.0
           d = {:a => 1, 'b' => 2}
+        RUBY
+      )
+    )
+  end
+
+  def test_annotation_tokenizer
+    assert_equal(
+      ["fn","<","T",",","U",">","(","Integer",",","T",")",
+       "->","Array","<","U",">"
+      ],
+      AnnotationParser.tokenize("fn<T,U>(Integer,T) -> Array<U>")
+    )
+  end
+
+  def test_recursion
+    assert_equal(
+      [[7, :fn_arg_type, '*', 'Integer', 'unannotated_recursive_function'],
+       [11, :fn_return_type, 'factorial_bad', :unannotated_recursive_function, 'Integer']],
+      parse_str(
+        <<-RUBY
+          #: fn(Integer) -> Integer
+          def factorial_good(n)
+            if n <= 1; 1 else n * factorial_good(n-1) end
+          end
+          # no annotation. can't figure out type in recursive case
+          def factorial_bad(n)
+            if n <= 1; 1 else n * factorial_bad(n-1) end
+          end
+
+          factorial_good(2)
+          factorial_bad(2)
+        RUBY
+      )
+    )
+  end
+
+  def test_function_annotations
+    assert_equal(
+      [[13, :fn_return_type, 'b', 'Float', 'Integer'],
+       [15, :fn_return_type, 'd', :nil, 'Integer'],
+       [22, :fn_return_type, 'a', 'Integer', 'Float']],
+      parse_str(
+        <<-RUBY
+          #: fn(Integer)
+          def a(x); nil end
+          #: fn(Integer) -> Float
+          def b(x); x end
+          #: fn(Integer) -> Float
+          def c(x); x.to_f end
+          #: fn(Integer)
+          def d(x); x end
+          #: fn()
+          def e(); end
+
+          a(2)
+          b(2)  # fail
+          c(2)
+          d(2)  # fail
+          e
+
+          class A
+            #: fn(Float) -> Integer
+            def self.a(x); x end
+          end
+          A.a(1.0)
         RUBY
       )
     )
