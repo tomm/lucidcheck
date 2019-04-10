@@ -514,6 +514,7 @@ def make_root
   rboolean = robject.define(Rclass.new('Boolean', robject))
   rarray   = robject.define(Rclass.new('Array', robject, template_params: [_T]))
   rhash    = robject.define(Rclass.new('Hash', robject, template_params: [_K, _V]))
+  rrange   = robject.define(Rclass.new('Range', robject, template_params: [_T]))
   rexception = robject.define(Rclass.new('Exception', robject))
   rstandarderror = robject.define(Rclass.new('StandardError', rexception))
   rruntimeerror = robject.define(Rclass.new('RuntimeError', rstandarderror))
@@ -531,6 +532,8 @@ def make_root
   robject.define(Rfunc.new('to_s', rstring, []))
   robject.define(Rfunc.new('to_f', rfloat, []))
   robject.define(Rfunc.new('to_i', rinteger, []))
+
+  rrange.define(Rfunc.new("to_a", rarray[[_T]], []))
 
   rhash.metaclass.define(Rfunc.new('new', rhash[[_K, _V]], []))
   rhash.define(Rfunc.new('[]=', _V, [_K, _V]))
@@ -645,6 +648,7 @@ class Context
     @rboolean = @robject.lookup('Boolean')[0]
     @rarray = @robject.lookup('Array')[0]
     @rhash = @robject.lookup('Hash')[0]
+    @rrange = @robject.lookup('Range')[0]
     @rundefined = Rundefined.new
     @scope = [@robject]
     @callstack = [FnScope.new(nil, nil, @robject, nil, nil)]
@@ -804,6 +808,8 @@ class Context
       n_resbody(node)
     when :ensure
       n_ensure(node)
+    when :irange
+      n_irange(node)
     when :const
       c = scope_top.lookup(node.children[1].to_s)[0]
       if c
@@ -813,8 +819,20 @@ class Context
         @rundefined
       end
     else
-      binding.pry
       raise "Line #{node.loc.line}: unknown AST node type #{node.type}:\r\n#{node}"
+    end
+  end
+
+  def n_irange(node)
+    _from = n_expr(node.children[0])
+    _to = n_expr(node.children[1])
+    int = type_lookup!(node, @robject, 'Integer')
+
+    if _from != int || _to != int
+      @errors << [node, :fn_arg_type, 'range', 'Integer,Integer', "#{_from.name},#{_to.name}"]
+      @rundefined
+    else
+      @rrange[[int]]
     end
   end
 
