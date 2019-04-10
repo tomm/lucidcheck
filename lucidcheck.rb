@@ -444,9 +444,15 @@ class Rconcreteclass < Rbindable
   def is_fully_specialized?
     !@specialization.map {|kv| kv[1].is_a?(TemplateType)}.any?
   end
-  def type; @class.type end
-  def lookup(method_name); @class.lookup(method_name) end
-  def define(rscopebinding); @class.define(rscopebinding) end
+  def type
+    @class.type
+  end
+  def lookup(method_name)
+    @class.lookup(method_name)
+  end
+  def define(rscopebinding)
+    @class.define(rscopebinding)
+  end
   def eql?(other)
     if is_fully_specialized?
       @class == other.class && @specialization == other.specialization
@@ -454,7 +460,9 @@ class Rconcreteclass < Rbindable
       self.equal?(other)
     end
   end
-  def ==(other); self.eql?(other) end
+  def ==(other)
+    self.eql?(other)
+  end
   # returns errors
   def specialize(template_param, concrete_type)
     t = @specialization[template_param]
@@ -506,6 +514,9 @@ def make_root
   rboolean = robject.define(Rclass.new('Boolean', robject))
   rarray   = robject.define(Rclass.new('Array', robject, template_params: [_T]))
   rhash    = robject.define(Rclass.new('Hash', robject, template_params: [_K, _V]))
+  rexception = robject.define(Rclass.new('Exception', robject))
+  rstandarderror = robject.define(Rclass.new('StandardError', rexception))
+  rruntimeerror = robject.define(Rclass.new('RuntimeError', rstandarderror))
   rself    = robject.define(SelfType.new)
 
   robject.define(Rconst.new('ARGV', rarray[[rstring]]))
@@ -613,6 +624,8 @@ class Context
         "No block given"
       when :parse_error
         "Parse error: #{e[2]}"
+      when :rescue_exception_type
+        "Invalid exception type in 'rescue': #{e[2]}"
       when :annotation_error
         e[2]
       else
@@ -757,18 +770,7 @@ class Context
     when :module
       # ignore for now :)
     when :if
-      cond = n_expr(node.children[0])
-      type1 = n_expr(node.children[1])
-      type2 = n_expr(node.children[2])
-
-      if cond != @rboolean
-        @errors << [node, :expected_boolean, cond.name]
-      end
-      if type1 == type2
-        type1
-      else
-        Rsumtype.new([type1, type2])
-      end
+      n_if(node)
     when :float
       type_lookup!(node, @robject, 'Float')
     when :int
@@ -794,6 +796,14 @@ class Context
       n_super(node)
     when :zsuper
       n_zsuper(node)
+    when :kwbegin
+      n_kwbegin(node)
+    when :rescue
+      n_rescue(node)
+    when :resbody
+      n_resbody(node)
+    when :ensure
+      n_ensure(node)
     when :const
       c = scope_top.lookup(node.children[1].to_s)[0]
       if c
@@ -803,8 +813,92 @@ class Context
         @rundefined
       end
     else
-      #binding.pry
-      raise "Line #{node.loc.line}: unknown AST node type #{node.type}: #{node}"
+      binding.pry
+      raise "Line #{node.loc.line}: unknown AST node type #{node.type}:\r\n#{node}"
+    end
+  end
+
+  def n_resbody(node)
+    _exceptions = node.children[0].to_a.map{ |n|
+      type = n_expr(n)
+      if type.is_a?(Rmetaclass)
+        type.metaclass_for
+      else
+        @errors << [n, :rescue_exception_type, type.name]
+        nil
+      end
+    }.compact
+
+    p node.children[1]
+    if node.children[1] != nil
+      # assign exception to an lvar
+      raise CheckerBug, 'expected lvasgn in resbody' unless node.children[1].type == :lvasgn
+      name = node.children[1].children[0].to_s
+      type = case _exceptions.length
+             when 0
+               @robject.lookup('StandardError')[0]
+             when 1
+               _exceptions.first
+             else
+               Rsumtype.new(_exceptions)
+             end
+      puts "assigning #{type.name} to #{name}"
+      rbinding, _ = callstack_top.lookup(name)
+
+      if type.is_a?(Rundefined)
+        # error already reported. do nothing
+      elsif rbinding == nil
+        callstack_top.define(Rlvar.new(name, type))
+      elsif rbinding.type != type
+        @errors << [node, :var_type, name, rbinding.type.name, type.name]
+      end
+    end
+    n_expr(node.children[2])
+  end
+
+  def n_kwbegin(node)
+    raise CheckerBug, "too many kwbegin children" unless node.children.length == 1
+    n_expr(node.children[0])
+  end
+
+  def n_ensure(node)
+    _rescue = n_expr(node.children[0])
+    _ensure = n_expr(node.children[1])
+    _rescue
+  end
+
+  def n_rescue(node)
+    _begin = n_expr(node.children[0])
+    _resbody = n_expr(node.children[1])
+    _else = n_expr(node.children[2])
+
+    if _else == nil
+      if _resbody == _begin
+        _resbody
+      else
+        Rsumtype.new([_resbody, _begin])
+      end
+    else
+      if _resbody == _else
+        _resbody
+      else
+        Rsumtype.new([_resbody, _else])
+      end
+    end
+  end
+
+  def n_if(node)
+    cond = n_expr(node.children[0])
+    type1 = n_expr(node.children[1])
+    type2 = n_expr(node.children[2])
+
+    if cond != @rboolean
+      @errors << [node, :expected_boolean, cond.name]
+    end
+    if type1 == type2
+      type1
+    else
+      Rsumtype.new([type1, type2])
     end
   end
 

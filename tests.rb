@@ -699,4 +699,122 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
   end
+
+  def test_rescue
+    assert_equal(
+      [[13, :var_type, 'a', 'Integer | Float', 'String']],
+      parse_str(
+        <<-RUBY
+          def func1
+            begin
+              3
+            rescue RuntimeError, StandardError => e
+              4
+            else
+              5.0
+            ensure
+              'hi'
+            end
+          end
+          a = func1
+          a = 'hi'  # fail
+        RUBY
+      )
+    )
+    assert_equal(
+      [[9, :var_type, 'b', 'Integer', 'String']],
+      parse_str(
+        <<-RUBY
+          def func2
+            begin
+              3
+            rescue RuntimeError, StandardError => e
+              4
+            end
+          end
+          b = func2
+          b = 'oi'
+        RUBY
+      )
+    )
+    assert_equal(
+      [[7, :var_type, 'c', 'Integer', 'Float']],
+      parse_str(
+        <<-RUBY
+          def func3
+            begin
+              3
+            end
+          end
+          c = func3
+          c = 4.0
+        RUBY
+      )
+    )
+    assert_equal(
+      [[9, :var_type, 'd', 'Integer', :nil]],
+      parse_str(
+        <<-RUBY
+          def func4
+            begin
+              3
+            rescue => e
+              4
+            end
+          end
+          d = func4
+          d = nil
+        RUBY
+      )
+    )
+    assert_equal(
+      [[5, :fn_unknown, 'hi', 'StandardError'],
+       [10, :var_type, 'e', 'Integer', :nil]],
+      parse_str(
+        <<-RUBY
+          def func5
+            begin
+              3
+            rescue => e
+              e.hi
+              4
+            end
+          end
+          e = func5
+          e = nil
+        RUBY
+      )
+    )
+    assert_equal(
+      [[5, :fn_unknown, 'poo', 'RuntimeError'],
+       [10, :var_type, 'f', 'Integer', :nil]],
+      parse_str(
+        <<-RUBY
+          def func6
+            begin
+              3
+            rescue RuntimeError => e
+              e.poo
+              4
+            end
+          end
+          f = func6
+          f = nil
+        RUBY
+      )
+    )
+    assert_equal(
+      [[3, :rescue_exception_type, 'String']],
+      parse_str(
+        <<-RUBY
+          def func6
+            begin
+            rescue 'hello'
+            end
+          end
+          func6
+        RUBY
+      )
+    )
+  end
 end
