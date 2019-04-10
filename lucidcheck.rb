@@ -11,6 +11,8 @@ require 'ripper'
 # fn<T>(T,T) -> T
 # fn<T,U>(fn(T) -> U, Array<T>) -> Array<U>
 class AnnotationParser
+  class TokenizerError < RuntimeError; end
+
   def initialize(tokens, lookup)
     @tokens = tokens
     @lookup = lookup
@@ -43,12 +45,13 @@ class AnnotationParser
     tokens
   end
 
+  #: fn() -> [type, error?]
   def get_type
     type = parse_type
-    if !@tokens.empty?
-      raise CheckerBug, "malformed annotation"
-    end
-    type
+    raise TokenizerError, "malformed annotation" unless @tokens.empty?
+    [type, nil]
+  rescue TokenizerError => e
+    [nil, e.to_s]
   end
 
   private
@@ -89,7 +92,7 @@ class AnnotationParser
 
   def expect!(val)
     if !has(val)
-      raise CheckerBug, "expected #{val} but found #{@tokens.first} in type annotation on line ??"
+      raise TokenizerError, "expected #{val} but found #{@tokens.first} in type annotation"
     else
       eat
     end
@@ -101,7 +104,7 @@ end
 
 class FnScope
   attr_reader :passed_block, :is_constructor, :caller_node, :in_class
-  ##: fn(Rmetaclass | Rclass, Rblock | nil)
+  #: fn(Rmetaclass | Rclass, Rblock | nil)
   def initialize(caller_node, fn_body_node, in_class, parent_scope, passed_block, is_constructor: false)
     @in_class = in_class
     @local_scope = {}
@@ -124,7 +127,7 @@ class FnScope
     end
   end
 
-  ##: fn(String) > [Rbindable, Rbindable]
+  #: fn(String) > [Rbindable, Rbindable]
   # returns       [object, scope]
   def lookup(name)
     r = [@local_scope[name], @in_class]
@@ -151,13 +154,13 @@ class FnSig
     add_anon_args(anon_args)
   end
 
-  ##: fn(Array[Rbindable])
+  #: fn(Array[Rbindable])
   def add_anon_args(args)
     args.each { |a| @args << [nil, a] }
   end
 
   # named as in def my_func(x, y, z). ie not keyword args
-  ##: fn(Array[[String, Rbindable]])
+  #: fn(Array[[String, Rbindable]])
   def add_named_args(args)
     @args.concat(args)
   end
@@ -176,7 +179,7 @@ class FnSig
     @args.map{ |a| template_types[a[1]] || a[1] }
   end
 
-  ##: fn(FnSig)
+  #: fn(FnSig)
   def structural_eql?(other_sig, template_types = {})
     ret = template_types[@return_type] || @return_type
     args_match = other_sig.args.map { |v|
@@ -185,7 +188,7 @@ class FnSig
     return (ret == other_sig.return_type) && args_match
   end
 
-  ##: fn(Array[Rbindable]) > Array[error]
+  #: fn(Array[Rbindable]) > Array[error]
   def call_typecheck?(node, fn_name, passed_args, mut_template_types, block, self_type)
 
     if passed_args.map { |a| a == nil }.any?
@@ -253,7 +256,7 @@ class FnSig
 
   private
 
-  ##: fn() > Array[error]
+  #: fn() > Array[error]
   def function_call_type_error(node, fn_name, passed_args, template_types)
     [node, :fn_arg_type, fn_name, args_to_s(template_types), passed_args.map(&:name).join(',')]
   end
@@ -334,7 +337,7 @@ class Rfunc < Rbindable
   attr_accessor :node, :body, :sig, :block_sig
   attr_reader :is_constructor
 
-  ##: fn(String, Rbindable, Array[Rbindable])
+  #: fn(String, Rbindable, Array[Rbindable])
   def initialize(name, return_type, anon_args = [], is_constructor: false, block_sig: nil)
     super(name, nil)
     @sig = FnSig.new(return_type, anon_args)
@@ -348,7 +351,7 @@ class Rfunc < Rbindable
   end
 
   # named as in def my_func(x, y, z). ie not keyword args
-  ##: fn(Array[[String, Rbindable]])
+  #: fn(Array[[String, Rbindable]])
   def add_named_args(arg_name_type)
     @sig.add_named_args(arg_name_type)
   end
@@ -472,7 +475,7 @@ end
 
 class Rsumtype < Rbindable
   attr_reader :options
-  ##: fn(Array[Rbindable])
+  #: fn(Array[Rbindable])
   def initialize(types)
     super(types.map(&:to_s).join(' | '), nil)
     @options = types
@@ -692,12 +695,12 @@ class Context
     @callstack.pop
   end
 
-  ##: fn(FnScope)
+  #: fn(FnScope)
   def push_callstack(fnscope)
     @callstack.push(fnscope)
   end
 
-  ##: returns type
+  #: returns type
   def n_expr(node)
     case node&.type
     when nil
@@ -801,7 +804,7 @@ class Context
       end
     else
       #binding.pry
-      raise "Unknown AST node type #{node.type}: #{node} at line #{node.loc.line}"
+      raise "Line #{node.loc.line}: unknown AST node type #{node.type}: #{node}"
     end
   end
 
@@ -1122,6 +1125,16 @@ class Context
     end
   end
 
+  def get_annotation_for_node(node)
+    if (annot = @annotations[node.loc.line-1])
+      type, error = AnnotationParser.new(annot, callstack_top.method(:lookup)).get_type
+      @errors << [node, :annotation_error, error] unless error == nil
+      type
+    else
+      nil
+    end
+  end
+
   # define static method
   def n_defs(node)
     if node.children[0].type != :self
@@ -1131,8 +1144,9 @@ class Context
     # [ [name, type], ... ]
     arg_name_type = node.children[2].to_a.map{|x| [x.children[0].to_s, nil] }
 
-    if (annot = @annotations[node.loc.line-1])
-      fn = AnnotationParser.new(annot, callstack_top.method(:lookup)).get_type
+    annot_type = get_annotation_for_node(node)
+    if annot_type
+      fn = annot_type
       fn.name = name
       if arg_name_type.length != fn.sig.args.length
         @errors << [node, :annotation_error, "Number of arguments (#{arg_name_type.length}) does not match annotation (#{fn.sig.args.length})"]
@@ -1155,17 +1169,11 @@ class Context
     # [ [name, type], ... ]
     arg_name_type = node.children[1].to_a.map{|x| [x.children[0].to_s, nil] }
 
-    if (annot = @annotations[node.loc.line-1])
-      puts "Annotation for #{name} is #{annot}"
-      anot_type = AnnotationParser.new(annot, callstack_top.method(:lookup)).get_type
-      puts "Annotated type is #{anot_type.sig}"
-    else
-      anot_type = nil
-    end
+    annot_type = get_annotation_for_node(node)
 
     # define function with no known argument types (so far)
     if name == 'initialize'
-      if anot_type
+      if annot_type
         @errors << [node, :annotation_error, "Annotations not (yet) supported on constructors"]
       end
       # assume return type for 'new' method
@@ -1175,11 +1183,11 @@ class Context
       fn.body = node.children[2]
       scope_top.metaclass.define(fn)
     else
-      if anot_type
-        fn = anot_type
+      if annot_type
+        fn = annot_type
         fn.name = name
-        if arg_name_type.length != anot_type.sig.args.length
-          @errors << [node, :annotation_error, "Number of arguments (#{arg_name_type.length}) does not match annotation (#{anot_type.sig.args.length})"]
+        if arg_name_type.length != annot_type.sig.args.length
+          @errors << [node, :annotation_error, "Number of arguments (#{arg_name_type.length}) does not match annotation (#{annot_type.sig.args.length})"]
         else
           fn.sig.name_anon_args(arg_name_type.map { |nt| nt[0] })
         end
