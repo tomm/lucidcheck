@@ -56,14 +56,40 @@ class AnnotationParser
 
   private
 
+  def parse_block_sig
+    expect! '&'
+    expect! '('
+    args = []
+    loop {
+      args.push(parse_type) if !has ')'
+      break unless has ','
+    }
+    expect! ')'
+    return_type = if has '->'
+      eat
+      parse_type
+    else
+      @lookup.('Nil')[0]
+    end
+    FnSig.new(return_type, args)
+  end
+
   def parse_type
     if has 'fn'
       eat
-      expect! '('
+      has '('
       args = []
+      block_sig = nil
       loop {
-        args.push(parse_type) if !has ')'
-        if has(',') then eat else break end
+        eat
+        if has '&'
+          block_sig = parse_block_sig
+          break
+        elsif !has ')'
+          args.push(parse_type)
+        end
+
+        break unless has ','
       }
       expect! ')'
       if has '->'
@@ -73,8 +99,9 @@ class AnnotationParser
         return_type = @lookup.('Nil')[0]
       end
 
-      Rfunc.new(nil, return_type, args)
-
+      t = Rfunc.new(nil, return_type, args, block_sig: block_sig)
+      puts "making turd #{t.sig.to_s}"
+      t
     else
       @lookup.(eat)[0]
     end
@@ -144,18 +171,19 @@ end
 class FnScope < Scope
   attr_reader :passed_block, :is_constructor, :caller_node, :in_class
   #: fn(Rmetaclass | Rclass, Rblock | nil)
-  def initialize(caller_node, fn_body_node, in_class, parent_scope, passed_block, is_constructor: false)
+  def initialize(caller_node, caller_scope, fn_body_node, in_class, parent_scope, passed_block, is_constructor: false)
     @in_class = in_class
     @local_scope = {}
     @parent_scope = parent_scope
     @passed_block = passed_block
     @is_constructor = is_constructor
     @caller_node = caller_node
+    @caller_scope = caller_scope
     @fn_body_node = fn_body_node
   end
 
   def is_fn_body_node_in_stack(node)
-    @fn_body_node.equal?(node) || @parent_scope && @parent_scope.is_fn_body_node_in_stack(node)
+    @fn_body_node.equal?(node) || @caller_scope && @caller_scope.is_fn_body_node_in_stack(node)
   end
 
   def lookup_super
@@ -733,7 +761,7 @@ class Context
 
     @errors = []
     @annotations = {}
-    @scopestack = [FnScope.new(nil, nil, @robject, nil, nil)]
+    @scopestack = [FnScope.new(nil, nil, nil, @robject, nil, nil)]
   end
 
   def check(source)
@@ -1056,7 +1084,7 @@ class Context
         return @rundefined
       end
 
-      function_scope = FnScope.new(node, block.body_node, scope_top.in_class, block.fn_scope, nil)
+      function_scope = FnScope.new(node, nil, block.body_node, scope_top.in_class, block.fn_scope, nil)
       # define lvars from arguments
       block.sig.args.each { |a| function_scope.define_lvar(Rlvar.new(a[0], a[1])) }
 
@@ -1131,7 +1159,7 @@ class Context
 
     scope_top.in_class.define(new_class)
 
-    push_scope(FnScope.new(node, nil, new_class, nil, nil, is_constructor: false))
+    push_scope(FnScope.new(node, nil, nil, new_class, nil, nil, is_constructor: false))
     r = n_expr(node.children[2])
 
     # define a 'new' static method if 'initialize' was not defined
@@ -1280,7 +1308,7 @@ class Context
     elsif fn.block_sig && block.sig.args.length != fn.block_sig.args.length
       @errors << [scope_top.caller_node || node, :block_arg_num, fn.name, fn.block_sig.args.length, block.sig.args.length]
     elsif fn.body != nil # means not a purely 'header' function def (ie ruby standard lib type stubs)
-      function_scope = FnScope.new(node, fn.body, call_scope, nil, block, is_constructor: fn.is_constructor)
+      function_scope = FnScope.new(node, scope_top, fn.body, call_scope, nil, block, is_constructor: fn.is_constructor)
       # define lvars from arguments
       fn.sig.args.each { |a| function_scope.define_lvar(Rlvar.new(a[0], a[1])) }
 

@@ -294,11 +294,12 @@ class TestLucidCheck < Test::Unit::TestCase
 
   def test_block_scope
     assert_equal(
-      [[9, :var_type, 'q', 'String', 'Float'],
-       [16, :fn_unknown, 'x', 'Object'],
-       [16, :fn_arg_type, "puts", "String", "undefined"]],
+      [[10, :var_type, 'q', 'String', 'Float'],
+       [17, :fn_unknown, 'x', 'Object'],
+       [17, :fn_arg_type, "puts", "String", "undefined"]],
       parse_str(
         <<-RUBY
+          #: fn(&() -> Integer) -> Integer
           def noop
             yield
           end
@@ -670,7 +671,9 @@ class TestLucidCheck < Test::Unit::TestCase
     assert_equal(
       [[13, :fn_return_type, 'b', 'Float', 'Integer'],
        [15, :fn_return_type, 'd', 'Nil', 'Integer'],
-       [22, :fn_return_type, 'a', 'Integer', 'Float']],
+       [22, :fn_return_type, 'a', 'Integer', 'Float'],
+       [30, :fn_return_type, "do_thing", "Integer", "Float"],
+       [30, :block_arg_type, "do_thing", "(Integer) > Integer", "(Integer) > Float"]],
       parse_str(
         <<-RUBY
           #: fn(Integer)
@@ -695,6 +698,14 @@ class TestLucidCheck < Test::Unit::TestCase
             def self.a(x); x end
           end
           A.a(1.0)
+
+          #: fn(Integer, &(Integer) -> Integer) -> Integer
+          def do_thing(x)
+            yield x
+          end
+
+          do_thing(2) { |a| a * 2 }
+          do_thing(2) { |a| a.to_f }
         RUBY
       )
     )
