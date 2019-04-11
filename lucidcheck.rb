@@ -1084,7 +1084,7 @@ class Context
         return @rundefined
       end
 
-      function_scope = FnScope.new(node, nil, block.body_node, scope_top.in_class, block.fn_scope, nil)
+      function_scope = FnScope.new(node, scope_top, block.body_node, scope_top.in_class, block.fn_scope, nil)
       # define lvars from arguments
       block.sig.args.each { |a| function_scope.define_lvar(Rlvar.new(a[0], a[1])) }
 

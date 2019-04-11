@@ -665,6 +665,28 @@ class TestLucidCheck < Test::Unit::TestCase
         RUBY
       )
     )
+
+    assert_equal(
+      [],
+      parse_str(
+        <<-RUBY
+          #: fn(Integer) -> Integer
+          def fac(n)
+            if n == 1
+              1
+            else
+              n * doo { fac(n-1) }
+            end
+          end
+
+          def doo
+            yield
+          end
+
+          p fac(6)
+        RUBY
+      )
+    )
   end
 
   def test_function_annotations
