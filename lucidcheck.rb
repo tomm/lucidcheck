@@ -515,13 +515,13 @@ def make_root
   rarray   = robject.define(Rclass.new('Array', robject, template_params: [_T]))
   rhash    = robject.define(Rclass.new('Hash', robject, template_params: [_K, _V]))
   rrange   = robject.define(Rclass.new('Range', robject, template_params: [_T]))
+  rfile    = robject.define(Rclass.new('File', robject))
   rexception = robject.define(Rclass.new('Exception', robject))
   rstandarderror = robject.define(Rclass.new('StandardError', rexception))
   rruntimeerror = robject.define(Rclass.new('RuntimeError', rstandarderror))
   rself    = robject.define(SelfType.new)
 
   robject.define(Rconst.new('ARGV', rarray[[rstring]]))
-
   robject.define(Rlvar.new('$0', rstring))
   robject.define(Rfunc.new('!', rboolean, []))
   robject.define(Rfunc.new('require', rnil, [rstring]))
@@ -533,6 +533,10 @@ def make_root
   robject.define(Rfunc.new('to_f', rfloat, []))
   robject.define(Rfunc.new('to_i', rinteger, []))
 
+  # XXX incomplete
+  rfile.metaclass.define(Rfunc.new('open', rfile, [rstring]))
+  rfile.define(Rfunc.new('read', rstring, []))
+
   rrange.define(Rfunc.new("to_a", rarray[[_T]], []))
 
   rhash.metaclass.define(Rfunc.new('new', rhash[[_K, _V]], []))
@@ -541,15 +545,21 @@ def make_root
 
   rarray.metaclass.define(Rfunc.new('new', rarray[[_T]], []))
   rarray.define(Rfunc.new('length', rinteger, []))
+  rarray.define(Rfunc.new('clear', rself, []))
   rarray.define(Rfunc.new('push', rself, [_T]))
   rarray.define(Rfunc.new('[]', _T, [rinteger]))
   rarray.define(Rfunc.new('[]=', _T, [rinteger, _T]))
   rarray.define(Rfunc.new('include?', rboolean, [_T]))
+  # XXX incomplete
+  rarray.define(Rfunc.new('join', rstring, [rstring]))
+  rarray.define(Rfunc.new('empty?', rboolean, []))
   rarray.define(Rfunc.new('map', rarray[[_U]], [], block_sig: FnSig.new(_U, [_T])))
   rarray.define(Rfunc.new('each', rarray[[_T]], [], block_sig: FnSig.new(_U, [_T])))
   rarray.define(Rfunc.new('==', rboolean, [rself]))
 
   rstring.define(Rfunc.new('upcase', rstring, []))
+  # XXX incomplete
+  rstring.define(Rfunc.new('split', rarray[[rstring]], [rstring]))
   rstring.define(Rfunc.new('+', rstring, [rstring]))
   rstring.define(Rfunc.new('==', rboolean, [rstring]))
 
@@ -660,7 +670,7 @@ class Context
   end
 
   def check(source)
-    @errors = []
+    @errors.clear
     begin
       lines = source.split("\n")
       @annotations = (1..lines.length).to_a.zip(lines).select { |item|
