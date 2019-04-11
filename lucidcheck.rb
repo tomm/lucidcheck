@@ -847,20 +847,19 @@ class Context
     when :if
       n_if(node)
     when :float
-      type_lookup!(node, @robject, 'Float')
+      lookup_type(@robject, 'Float')
     when :int
-      type_lookup!(node, @robject, 'Integer')
+      lookup_type(@robject, 'Integer')
     when :str
-      type_lookup!(node, @robject, 'String')
+      lookup_type(@robject, 'String')
     when :dstr # XXX could check dstr
-      puts "XXX need to handle dstr properly"
-      type_lookup!(node, @robject, 'String')
+      n_dstr(node)
     when :true
-      type_lookup!(node, @robject, 'Boolean')
+      lookup_type(@robject, 'Boolean')
     when :false
-      type_lookup!(node, @robject, 'Boolean')
+      lookup_type(@robject, 'Boolean')
     when :sym
-      type_lookup!(node, @robject, 'Symbol')
+      lookup_type(@robject, 'Symbol')
     when :array
       n_array_literal(node)
     when :hash
@@ -896,6 +895,14 @@ class Context
     end
   end
 
+  def n_dstr(node)
+    if node.children.map { |n| n_expr(n).is_a?(Rundefined) }.any?
+      @rundefined
+    else
+      lookup_type(@robject, 'String')
+    end
+  end
+
   def n_case(node)
     needle = n_expr(node.children[0])
     whens = node.children.drop(1)
@@ -921,7 +928,7 @@ class Context
   def n_irange(node)
     _from = n_expr(node.children[0])
     _to = n_expr(node.children[1])
-    int = type_lookup!(node, @robject, 'Integer')
+    int = lookup_type(@robject, 'Integer')
 
     if _from != int || _to != int
       @errors << [node, :fn_arg_type, 'range', 'Integer,Integer', "#{_from.name},#{_to.name}"]
@@ -1137,23 +1144,14 @@ class Context
     r
   end
 
-  def type_lookup!(node, scope, type_identifier)
-    if type_identifier == nil
-      @errors << [node, :inference_failed]
-      return @rundefined
-    elsif type_identifier == :error
-      # error happened in resolving type. don't report another error
-      return @rundefined
-    end
-
+  def lookup_type(scope, type_identifier)
     type = scope.lookup(type_identifier)[0]
-
     if type == nil then
       # type not found
       @errors << [node, :type_unknown, type_identifier]
-      return @rundefined
+      @rundefined
     else
-      return type
+      type
     end
   end
 

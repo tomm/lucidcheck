@@ -920,4 +920,18 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
   end
+
+  def test_dstr
+    assert_equal(
+      [[4, :fn_unknown, 'whatever', 'Array<Integer>'],
+       [4, :fn_arg_type, 'puts', 'String', 'undefined']],
+      parse_str(
+         'a = "hi"
+          b = [1,2,3]
+          puts "#{a} #{b.join(\',\')}"
+          puts "#{a} #{b.whatever}"
+          '
+      )
+    )
+  end
 end
