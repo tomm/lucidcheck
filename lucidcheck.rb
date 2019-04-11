@@ -108,9 +108,40 @@ class Scope
   def lookup; raise NotImplementedError end
   def define_lvar(rbindable); raise NotImplementedError end
   def define_ivar(rbindable); raise NotImplementedError end
+  def is_fn_body_node_in_stack(node); raise NotImplementedError end
 end
 
-class FnScope
+# Used to forbid sloppy scoping in 'if', 'case', 'rescue' etc
+class WeakScope < Scope
+  def initialize(parent_scope)
+    @parent = parent_scope
+    @local_scope = {}
+  end
+
+  def lookup(name)
+    r = [@local_scope[name], @parent.in_class]
+    if r[0] == nil then @parent.lookup(name) else r end
+  end
+
+  def define_lvar(rbindable)
+    if @parent.lookup(rbindable)[0] == nil
+      @local_scope[rbindable.name] = rbindable
+    else
+      raise CheckerBug, "tried to define shadowing variable on WeakScope"
+    end
+  end
+
+  # delegate to @parent scope
+  def lookup_super; @parent.lookup_super end
+  def is_fn_body_node_in_stack(node); @parent.is_fn_body_node_in_stack(node) end
+  def define_ivar(rbindable); @parent.define_ivar(rbindable) end
+  def passed_block; @parent.passed_block end
+  def is_constructor; @parent.is_constructor end
+  def caller_node; @parent.caller_node end
+  def in_class; @parent.in_class end
+end
+
+class FnScope < Scope
   attr_reader :passed_block, :is_constructor, :caller_node, :in_class
   #: fn(Rmetaclass | Rclass, Rblock | nil)
   def initialize(caller_node, fn_body_node, in_class, parent_scope, passed_block, is_constructor: false)
@@ -939,19 +970,29 @@ class Context
     end
   end
 
-  def n_if(node)
-    cond = n_expr(node.children[0])
-    type1 = n_expr(node.children[1])
-    type2 = n_expr(node.children[2])
+  #: fn(&fn() -> Rbindable)
+  def weak_scoped
+    push_scope(WeakScope.new(scope_top))
+    v = yield
+    pop_scope()
+    v
+  end
 
-    if cond != @rboolean
-      @errors << [node, :expected_boolean, cond.name]
-    end
-    if type1 == type2
-      type1
-    else
-      Rsumtype.new([type1, type2])
-    end
+  def n_if(node)
+    weak_scoped {
+      cond = n_expr(node.children[0])
+      type1 = weak_scoped { n_expr(node.children[1]) }
+      type2 = weak_scoped { n_expr(node.children[2]) }
+
+      if cond != @rboolean
+        @errors << [node, :expected_boolean, cond.name]
+      end
+      if type1 == type2
+        type1
+      else
+        Rsumtype.new([type1, type2])
+      end
+    }
   end
 
   def n_logic_op(node)

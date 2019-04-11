@@ -872,4 +872,29 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
   end
+
+  def test_weak_scopes
+    assert_equal(
+      [[4, :var_type, 'x', 'Integer', 'String'],
+       [8, :lvar_unknown, 'y'],
+       [11, :lvar_unknown, 'a'],
+       [12, :lvar_unknown, 'y']],
+      parse_str(
+        <<-RUBY
+          x = 2
+          if (a = rand() > 0.5)
+            puts a.to_s
+            x = 'hi'
+            y = x
+            puts y.to_s
+          else
+            y  # fails
+          end
+          x
+          a  # fails
+          y  # fails
+        RUBY
+      )
+    )
+  end
 end
