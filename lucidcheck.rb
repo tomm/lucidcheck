@@ -102,6 +102,14 @@ end
 class CheckerBug < RuntimeError
 end
 
+# XXX need way to set types of abstract methods, and enforce in implementation
+class Scope
+  def lookup_super; raise NotImplementedError end
+  def lookup; raise NotImplementedError end
+  def define_lvar(rbindable); raise NotImplementedError end
+  def define_ivar(rbindable); raise NotImplementedError end
+end
+
 class FnScope
   attr_reader :passed_block, :is_constructor, :caller_node, :in_class
   #: fn(Rmetaclass | Rclass, Rblock | nil)
@@ -136,12 +144,12 @@ class FnScope
     r
   end
 
-  def define(rscopebinding)
-    @local_scope[rscopebinding.name] = rscopebinding
+  def define_lvar(rbindable)
+    @local_scope[rbindable.name] = rbindable
   end
 
-  def define_ivar(rscopebinding)
-    @in_class.define(rscopebinding)
+  def define_ivar(rbindable)
+    @in_class.define(rbindable)
   end
 end
 
@@ -380,8 +388,8 @@ class Rmetaclass < Rbindable
     [@namespace[method_name], self]
   end
 
-  def define(rscopebinding)
-    @namespace[rscopebinding.name] = rscopebinding
+  def define(rbindable)
+    @namespace[rbindable.name] = rbindable
   end
 end
 
@@ -409,8 +417,8 @@ class Rclass < Rbindable
     end
   end
 
-  def define(rscopebinding, bind_to: nil)
-    @namespace[bind_to || rscopebinding.name] = rscopebinding
+  def define(rbindable, bind_to: nil)
+    @namespace[bind_to || rbindable.name] = rbindable
   end
 
   def [](specialization)
@@ -450,8 +458,8 @@ class Rconcreteclass < Rbindable
   def lookup(method_name)
     @class.lookup(method_name)
   end
-  def define(rscopebinding)
-    @class.define(rscopebinding)
+  def define(rbindable)
+    @class.define(rbindable)
   end
   def eql?(other)
     if is_fully_specialized?
@@ -663,10 +671,10 @@ class Context
     @rhash = @robject.lookup('Hash')[0]
     @rrange = @robject.lookup('Range')[0]
     @rundefined = Rundefined.new
-    @scope = [@robject]
-    @callstack = [FnScope.new(nil, nil, @robject, nil, nil)]
+
     @errors = []
     @annotations = {}
+    @scopestack = [FnScope.new(nil, nil, @robject, nil, nil)]
   end
 
   def check(source)
@@ -705,29 +713,17 @@ class Context
     }
   end
 
-  def push_scope(scope)
-    @scope.push(scope)
+  def scope_top
+    @scopestack.last
   end
 
   def pop_scope
-    @scope.pop
-  end
-
-  def scope_top
-    @scope.last
-  end
-
-  def callstack_top
-    @callstack.last
-  end
-
-  def pop_callstack
-    @callstack.pop
+    @scopestack.pop
   end
 
   #: fn(FnScope)
-  def push_callstack(fnscope)
-    @callstack.push(fnscope)
+  def push_scope(fnscope)
+    @scopestack.push(fnscope)
   end
 
   #: returns type
@@ -746,7 +742,7 @@ class Context
     when :defs # define static method
       n_defs(node)
     when :self
-      callstack_top.in_class
+      scope_top.in_class
     when :gvar
       gvar = @robject.lookup(node.children[0].to_s)[0]
       if gvar == nil
@@ -756,7 +752,7 @@ class Context
         gvar.type
       end
     when :ivar
-      ivar = callstack_top.lookup(node.children[0].to_s)[0]
+      ivar = scope_top.lookup(node.children[0].to_s)[0]
       if ivar == nil
         @errors << [node, :ivar_unknown, node.children[0].to_s]
         @rundefined
@@ -764,7 +760,7 @@ class Context
         ivar.type
       end
     when :lvar
-      lvar = callstack_top.lookup(node.children[0].to_s)[0]
+      lvar = scope_top.lookup(node.children[0].to_s)[0]
       if lvar == nil
         @errors << [node, :lvar_unknown, node.children[0].to_s]
         @rundefined
@@ -899,12 +895,12 @@ class Context
                Rsumtype.new(_exceptions)
              end
       puts "assigning #{type.name} to #{name}"
-      rbinding, _ = callstack_top.lookup(name)
+      rbinding, _ = scope_top.lookup(name)
 
       if type.is_a?(Rundefined)
         # error already reported. do nothing
       elsif rbinding == nil
-        callstack_top.define(Rlvar.new(name, type))
+        scope_top.define_lvar(Rlvar.new(name, type))
       elsif rbinding.type != type
         @errors << [node, :var_type, name, rbinding.type.name, type.name]
       end
@@ -972,24 +968,24 @@ class Context
 
   def block_call(node, block, passed_args, mut_template_types)
     if block == nil
-      @errors << [callstack_top.caller_node || node, :no_block_given]
+      @errors << [scope_top.caller_node || node, :no_block_given]
       @rundefined
     else
-      type_errors = block.sig.call_typecheck?(callstack_top.caller_node || node, '<block>', passed_args, mut_template_types, nil, scope_top)
+      type_errors = block.sig.call_typecheck?(scope_top.caller_node || node, '<block>', passed_args, mut_template_types, nil, scope_top.in_class)
 
       if !type_errors.empty?
         @errors.concat(type_errors)
         return @rundefined
       end
 
-      function_scope = FnScope.new(node, block.body_node, scope_top, block.fn_scope, nil)
+      function_scope = FnScope.new(node, block.body_node, scope_top.in_class, block.fn_scope, nil)
       # define lvars from arguments
-      block.sig.args.each { |a| function_scope.define(Rlvar.new(a[0], a[1])) }
+      block.sig.args.each { |a| function_scope.define_lvar(Rlvar.new(a[0], a[1])) }
 
       # find block return type by evaluating body with concrete argument types in scope
-      push_callstack(function_scope)
+      push_scope(function_scope)
       block.sig.return_type = n_expr(block.body_node)
-      pop_callstack()
+      pop_scope()
 
       block.sig.return_type
     end
@@ -997,19 +993,19 @@ class Context
 
   def n_yield(node)
     args = node.children.map {|n| n_expr(n) }
-    block = callstack_top.passed_block
+    block = scope_top.passed_block
     block_call(node, block, args, {})
   end
 
   def n_super(node)
     args = node.children.map {|n| n_expr(n) }
-    fn, call_scope = callstack_top.lookup_super
-    function_call(callstack_top.in_class, call_scope, fn, node, args, callstack_top.passed_block)
+    fn, call_scope = scope_top.lookup_super
+    function_call(scope_top.in_class, call_scope, fn, node, args, scope_top.passed_block)
   end
 
   def n_zsuper(node)
-    fn, call_scope = callstack_top.lookup_super
-    function_call(callstack_top.in_class, call_scope, fn, node, [], callstack_top.passed_block)
+    fn, call_scope = scope_top.lookup_super
+    function_call(scope_top.in_class, call_scope, fn, node, [], scope_top.passed_block)
   end
 
   def n_hash_literal(node)
@@ -1054,14 +1050,15 @@ class Context
       class_name,
       parent_class
     )
-    scope_top.define(new_class)
 
-    push_scope(new_class)
+    scope_top.in_class.define(new_class)
+
+    push_scope(FnScope.new(node, nil, new_class, nil, nil, is_constructor: false))
     r = n_expr(node.children[2])
 
     # define a 'new' static method if 'initialize' was not defined
-    if scope_top.metaclass.lookup('new')[0] == nil
-      scope_top.metaclass.define(Rfunc.new('new', new_class))
+    if scope_top.in_class.metaclass.lookup('new')[0] == nil
+      scope_top.in_class.metaclass.define(Rfunc.new('new', new_class))
     end
 
     pop_scope()
@@ -1096,14 +1093,14 @@ class Context
 
     if type.is_a?(Rundefined)
       # error already reported. do nothing
-    elsif callstack_top.lookup(name)[0] == nil
-      if callstack_top.is_constructor == false
+    elsif scope_top.lookup(name)[0] == nil
+      if scope_top.is_constructor == false
         @errors << [node, :ivar_assign_outside_constructor, name]
       else
-        callstack_top.define_ivar(Rlvar.new(name, type))
+        scope_top.define_ivar(Rlvar.new(name, type))
       end
-    elsif callstack_top.lookup(name)[0].type != type
-      @errors << [node, :var_type, name, callstack_top.lookup(name)[0].type.name, type.name]
+    elsif scope_top.lookup(name)[0].type != type
+      @errors << [node, :var_type, name, scope_top.lookup(name)[0].type.name, type.name]
     else
       # binding already existed. types match. cool
     end
@@ -1115,12 +1112,12 @@ class Context
     name = node.children[0].to_s
     type = n_expr(node.children[1])
 
-    rbinding, _ = callstack_top.lookup(name)
+    rbinding, _ = scope_top.lookup(name)
 
     if type.is_a?(Rundefined)
       # error already reported. do nothing
     elsif rbinding == nil
-      callstack_top.define(Rlvar.new(name, type))
+      scope_top.define_lvar(Rlvar.new(name, type))
     elsif rbinding.type != type
       @errors << [node, :var_type, name, rbinding.type.name, type.name]
     end
@@ -1135,7 +1132,7 @@ class Context
     if type == nil
       # error already reported. do nothing
     elsif scope_top.lookup(name)[0] == nil
-      scope_top.define(Rconst.new(name, type))
+      scope_top.define_ivar(Rconst.new(name, type))
     else
       @errors << [node, :const_redef, name]
     end
@@ -1150,7 +1147,7 @@ class Context
 
     raise CheckerBug.new("expected :send, found #{send_node.type} in :block") unless send_node.type == :send
 
-    n_send(send_node, block = Rblock.new(block_arg_names, block_body, callstack_top))
+    n_send(send_node, block = Rblock.new(block_arg_names, block_body, scope_top))
   end
 
   # returns return type of method/function (or nil if not determined)
@@ -1164,7 +1161,7 @@ class Context
         type_scope = self_type
       end
     else
-      type_scope = scope_top
+      type_scope = scope_top.in_class
     end
     raise CheckerBug, 'invalid nil type_scope' if type_scope.nil?
     name = node.children[1].to_s
@@ -1203,22 +1200,22 @@ class Context
     if !type_errors.empty?
       @errors.concat(type_errors)
     elsif fn.block_sig && block.nil?
-      @errors << [callstack_top.caller_node || node, :no_block_given]
+      @errors << [scope_top.caller_node || node, :no_block_given]
     elsif fn.block_sig && block.sig.args.length != fn.block_sig.args.length
-      @errors << [callstack_top.caller_node || node, :block_arg_num, fn.name, fn.block_sig.args.length, block.sig.args.length]
+      @errors << [scope_top.caller_node || node, :block_arg_num, fn.name, fn.block_sig.args.length, block.sig.args.length]
     elsif fn.body != nil # means not a purely 'header' function def (ie ruby standard lib type stubs)
       function_scope = FnScope.new(node, fn.body, call_scope, nil, block, is_constructor: fn.is_constructor)
       # define lvars from arguments
-      fn.sig.args.each { |a| function_scope.define(Rlvar.new(a[0], a[1])) }
+      fn.sig.args.each { |a| function_scope.define_lvar(Rlvar.new(a[0], a[1])) }
 
-      if callstack_top.is_fn_body_node_in_stack(fn.body)
+      if scope_top.is_fn_body_node_in_stack(fn.body)
         # never actually recurse! we want this bastible to finish
         if fn.return_type == nil
           fn.return_type = Rrecursion.new
         end
       else
         # find function return type by evaluating body with concrete argument types in scope
-        push_callstack(function_scope)
+        push_scope(function_scope)
         ret = n_expr(fn.body)
         if !fn.is_constructor
           if fn.return_type == nil
@@ -1227,13 +1224,13 @@ class Context
             @errors << [node, :fn_return_type, fn.name, fn.return_type.name, ret.name]
           end
         end
-        pop_callstack()
+        pop_scope()
       end
 
       if block
         if fn.block_sig && !fn.block_sig.structural_eql?(block.sig, template_types)
           # block type mismatch
-          @errors << [callstack_top.caller_node || node, :block_arg_type, fn.name, fn.block_sig.sig_to_s(template_types), block.sig.sig_to_s(template_types)]
+          @errors << [scope_top.caller_node || node, :block_arg_type, fn.name, fn.block_sig.sig_to_s(template_types), block.sig.sig_to_s(template_types)]
         else
           fn.block_sig = block.sig
         end
@@ -1283,7 +1280,7 @@ class Context
 
   def get_annotation_for_node(node)
     if (annot = @annotations[node.loc.line-1])
-      type, error = AnnotationParser.new(annot, callstack_top.method(:lookup)).get_type
+      type, error = AnnotationParser.new(annot, scope_top.method(:lookup)).get_type
       @errors << [node, :annotation_error, error] unless error == nil
       type
     else
@@ -1317,7 +1314,7 @@ class Context
     fn.node = node
     fn.body = node.children[3]
     if fn.body == nil then fn.return_type = @rnil end
-    scope_top.metaclass.define(fn)
+    scope_top.in_class.metaclass.define(fn)
   end
 
   def n_def(node)
@@ -1333,11 +1330,11 @@ class Context
         @errors << [node, :annotation_error, "Annotations not (yet) supported on constructors"]
       end
       # assume return type for 'new' method
-      fn = Rfunc.new('new', scope_top, is_constructor: true)
+      fn = Rfunc.new('new', scope_top.in_class, is_constructor: true)
       fn.add_named_args(arg_name_type)
       fn.node = node
       fn.body = node.children[2]
-      scope_top.metaclass.define(fn)
+      scope_top.in_class.metaclass.define(fn)
     else
       if annot_type
         fn = annot_type
@@ -1356,7 +1353,7 @@ class Context
       fn.body = node.children[2]
       # can assume return type of nil if body is empty
       if fn.body == nil then fn.return_type = @rnil end
-      scope_top.define(fn)
+      scope_top.in_class.define(fn)
     end
   end
 end
