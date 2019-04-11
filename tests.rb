@@ -242,7 +242,7 @@ class TestLucidCheck < Test::Unit::TestCase
 
   def test_sum_types
     assert_equal(
-      [[4, :var_type, 'x', 'String | nil', 'Float']],
+      [[4, :var_type, 'x', 'Nil | String', 'Float']],
       parse_str(
         <<-RUBY
           x = if rand() > 0.5 then 'hi' else nil end
@@ -322,7 +322,7 @@ class TestLucidCheck < Test::Unit::TestCase
 
   def test_infer_empty_method_type
     assert_equal(
-      [[4, :var_type, 'x', :nil, 'Integer']],
+      [[4, :var_type, 'x', 'Nil', 'Integer']],
       parse_str(
         <<-RUBY
           def doNothing
@@ -395,7 +395,7 @@ class TestLucidCheck < Test::Unit::TestCase
       [[1, :fn_arg_type, 'fun1', 'Integer,Integer', 'Integer,String'],
        [3, :var_type, 'b', 'Float', 'Integer'],
        [4, :fn_arg_type, 'fun2', 'Integer,String,Integer,String,Integer', 'Integer,String,Float,Symbol,Integer'],
-       [6, :var_type, 'd', 'Integer', :nil],
+       [6, :var_type, 'd', 'Integer', 'Nil'],
        [8, :var_type, 'e', 'Float', 'Integer'],
        [9, :fn_unknown, 'whaa', 'String'],
        [10, :block_arg_num, 'fun3', 1, 0],
@@ -433,7 +433,7 @@ class TestLucidCheck < Test::Unit::TestCase
   
     assert_equal(
       [[4, :var_type, 'a', 'Integer', 'String'],
-       [6, :block_arg_type, 'fun2', '(Integer) > Integer', '(Integer) > nil']],
+       [6, :block_arg_type, 'fun2', '(Integer) > Integer', '(Integer) > Nil']],
       node_to_line_nums(ctx.check(
         <<-RUBY
           a = 123
@@ -450,7 +450,7 @@ class TestLucidCheck < Test::Unit::TestCase
   def test_generic_type_1_arg
     assert_equal(
       [[4, :fn_arg_type, '[]=', 'Integer,Integer', 'Integer,String'],
-       [7, :fn_arg_type, 'push', 'Integer', 'nil'],
+       [7, :fn_arg_type, 'push', 'Integer', 'Nil'],
        [8, :var_type, 'a', 'Array<Integer>', 'Array<generic>'],
        [10, :fn_arg_type, 'include?', 'Integer', 'Float'],
        [12, :var_type, 'a', 'Array<Integer>', 'Array<Float>'],
@@ -669,7 +669,7 @@ class TestLucidCheck < Test::Unit::TestCase
   def test_function_annotations
     assert_equal(
       [[13, :fn_return_type, 'b', 'Float', 'Integer'],
-       [15, :fn_return_type, 'd', :nil, 'Integer'],
+       [15, :fn_return_type, 'd', 'Nil', 'Integer'],
        [22, :fn_return_type, 'a', 'Integer', 'Float']],
       parse_str(
         <<-RUBY
@@ -702,7 +702,7 @@ class TestLucidCheck < Test::Unit::TestCase
 
   def test_rescue
     assert_equal(
-      [[13, :var_type, 'a', 'Integer | Float', 'String']],
+      [[13, :var_type, 'a', 'Float | Integer', 'String']],
       parse_str(
         <<-RUBY
           def func1
@@ -752,7 +752,7 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
     assert_equal(
-      [[9, :var_type, 'd', 'Integer', :nil]],
+      [[9, :var_type, 'd', 'Integer', 'Nil']],
       parse_str(
         <<-RUBY
           def func4
@@ -769,7 +769,7 @@ class TestLucidCheck < Test::Unit::TestCase
     )
     assert_equal(
       [[5, :fn_unknown, 'hi', 'StandardError'],
-       [10, :var_type, 'e', 'Integer', :nil]],
+       [10, :var_type, 'e', 'Integer', 'Nil']],
       parse_str(
         <<-RUBY
           def func5
@@ -787,7 +787,7 @@ class TestLucidCheck < Test::Unit::TestCase
     )
     assert_equal(
       [[5, :fn_unknown, 'poo', 'RuntimeError'],
-       [10, :var_type, 'f', 'Integer', :nil]],
+       [10, :var_type, 'f', 'Integer', 'Nil']],
       parse_str(
         <<-RUBY
           def func6
@@ -820,7 +820,7 @@ class TestLucidCheck < Test::Unit::TestCase
 
   def test_case_match
     assert_equal(
-      [[10, :var_type, 'a', 'String | nil', 'Symbol']],
+      [[10, :var_type, 'a', 'Nil | String', 'Symbol']],
       parse_str(
         <<-RUBY
           def f(x)
@@ -837,7 +837,7 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
     assert_equal(
-      [[12, :var_type, 'a', 'String | Integer', 'Symbol']],
+      [[12, :var_type, 'a', 'Integer | String', 'Symbol']],
       parse_str(
         <<-RUBY
           def f(x)
@@ -893,6 +893,29 @@ class TestLucidCheck < Test::Unit::TestCase
           x
           a  # fails
           y  # fails
+        RUBY
+      )
+    )
+  end
+
+  def test_csend
+    assert_equal(
+      [[6, :var_type, 'x', 'Integer | Nil | String', 'Float'],
+       [7, :fn_unknown, 'to_s', 'Integer | String'],
+       [9, :var_type, 'a', 'Nil | String', 'Integer'],
+       [10, :invalid_safe_send, 'Integer']],
+      parse_str(
+        <<-RUBY
+          w = if true then 'a' else nil end
+          x = if true then 'a' elsif false then 1 else nil end
+          x = w
+          y = if true then 1 else nil end
+          z = 1
+          x = 2.0
+          x&.to_s
+          a = y&.to_s
+          a = 1
+          z&.to_s
         RUBY
       )
     )

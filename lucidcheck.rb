@@ -70,7 +70,7 @@ class AnnotationParser
         eat
         return_type = parse_type
       else
-        return_type = @lookup.(:nil)[0]
+        return_type = @lookup.('Nil')[0]
       end
 
       Rfunc.new(nil, return_type, args)
@@ -227,7 +227,7 @@ class FnSig
     return (ret == other_sig.return_type) && args_match
   end
 
-  #: fn(Array[Rbindable]) > Array[error]
+  ##: fn(Array[Rbindable]) > Array[error]
   def call_typecheck?(node, fn_name, passed_args, mut_template_types, block, self_type)
 
     if passed_args.map { |a| a == nil }.any?
@@ -524,13 +524,38 @@ class Rsumtype < Rbindable
   attr_reader :options
   #: fn(Array[Rbindable])
   def initialize(types)
-    super(types.map(&:to_s).join(' | '), nil)
+    super(nil, nil)
     @options = types
+      .map { |t| if t.is_a?(Rsumtype) then t.options else [t] end }
+      .flatten
+      .uniq
+      .sort_by { |a| a.name.to_s }
+  end
+
+  def lookup(name)
+    [nil, nil]
+  end
+
+  def name
+    @options.map(&:name).join(' | ')
+  end
+
+  def is_optional
+    !!@options.detect { |o| o.name == 'Nil' }
+  end
+
+  def to_non_optional
+    types = @options.reject { |o| o.name == 'Nil' }
+    if types.length == 1
+      types.first
+    else
+      Rsumtype.new(types)
+    end
   end
 
   def ==(other)
     if other.is_a?(Rsumtype)
-      @options == other.options
+      other.options.map { |o| @options.include?(o) }.all?
     else
       @options.map { |o| o == other }.any?
     end
@@ -547,7 +572,7 @@ def make_root
   # denny is right
   rstring  = robject.define(Rclass.new('String', robject))
   rsymbol  = robject.define(Rclass.new('Symbol', robject))
-  rnil     = robject.define(Rclass.new(:nil, robject))
+  rnil     = robject.define(Rclass.new('Nil', robject))
   rinteger = robject.define(Rclass.new('Integer', robject))
   rfloat   = robject.define(Rclass.new('Float', robject))
   rboolean = robject.define(Rclass.new('Boolean', robject))
@@ -610,6 +635,7 @@ def make_root
   rinteger.define(Rfunc.new('>=', rboolean, [rinteger]))
   rinteger.define(Rfunc.new('<', rboolean, [rinteger]))
   rinteger.define(Rfunc.new('<=', rboolean, [rinteger]))
+  rinteger.define(Rfunc.new('==', rboolean, [rinteger]))
 
   rfloat.define(Rfunc.new('+', rfloat, [rfloat]))
   rfloat.define(Rfunc.new('-', rfloat, [rfloat]))
@@ -635,6 +661,8 @@ class Context
   def self.error_msg(filename, e)
     "#{filename}:#{e[0]&.loc&.line}:#{e[0]&.loc&.column&.+ 1}: E: " +
       case e[1]
+      when :invalid_safe_send
+        "Use of '&.' operator on non-nullable type '#{e[2]}'"
       when :type_unknown
         "Type '#{e[2]}' not found in this scope"
       when :ivar_assign_outside_constructor
@@ -696,7 +724,7 @@ class Context
     require "parser/current"
     @robject = make_root()
     @rself = @robject.lookup(:genericSelf)[0]
-    @rnil = @robject.lookup(:nil)[0]
+    @rnil = @robject.lookup('Nil')[0]
     @rboolean = @robject.lookup('Boolean')[0]
     @rarray = @robject.lookup('Array')[0]
     @rhash = @robject.lookup('Hash')[0]
@@ -803,6 +831,8 @@ class Context
     when :or
       n_logic_op(node)
     when :send
+      n_send(node)
+    when :csend
       n_send(node)
     when :ivasgn
       n_ivasgn(node)
@@ -1194,32 +1224,39 @@ class Context
   # returns return type of method/function (or nil if not determined)
   def n_send(node, block=nil)
     name = node.children[1].to_s
-    self_type = node.children[0] ? n_expr(node.children[0]) : @rnil
-    if self_type != @rnil
-      if self_type.kind_of?(Rundefined)
-        return self_type
-      else
-        type_scope = self_type
-      end
-    else
-      type_scope = scope_top.in_class
-    end
-    raise CheckerBug, 'invalid nil type_scope' if type_scope.nil?
+    type_scope = node.children[0] ? n_expr(node.children[0]) : scope_top.in_class
     name = node.children[1].to_s
     arg_types = node.children[2..-1].map {|n| n_expr(n) }
-    num_args = arg_types.length
+
+    return @rundefined if type_scope.kind_of?(Rundefined)
+
+    # &. method invocation
+    if node.type == :csend
+      if type_scope.is_a?(Rsumtype) && type_scope.is_optional
+        type_scope = type_scope.to_non_optional
+      else
+        @errors << [node, :invalid_safe_send, type_scope.name]
+        return @rundefined
+      end
+    end
 
     # find actual class the method was retrieved from. eg may be parent class of 'type_scope'
     fn, call_scope = type_scope.lookup(name)
 
     if fn == nil
       @errors << [node, :fn_unknown, name, type_scope.name]
-      return @rundefined
-    elsif fn.kind_of?(Rfunc)
-      return function_call(type_scope, call_scope, fn, node, arg_types, block)
-    else
+      @rundefined
+    elsif !fn.kind_of?(Rfunc)
       @errors << [node, :not_a_function, name]
-      return @rundefined
+      @rundefined
+    else
+      ret = function_call(type_scope, call_scope, fn, node, arg_types, block)
+
+      if node.type == :csend
+        Rsumtype.new([@rnil, ret])
+      else
+        ret
+      end
     end
   end
 
