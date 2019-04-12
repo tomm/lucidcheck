@@ -7,7 +7,7 @@ def node_to_line_nums(errors)
 end
 
 def parse_str(str)
-  node_to_line_nums(Context.new.check(str))
+  node_to_line_nums(Context.new.check(nil, str))
 end
 
 def parse_file(filename)
@@ -401,7 +401,7 @@ class TestLucidCheck < Test::Unit::TestCase
        [9, :fn_unknown, 'whaa', 'String'],
        [10, :block_arg_num, 'fun3', 1, 0],
        [11, :block_arg_type, 'fun4', '(String) > Integer', '(String) > Float']],
-      node_to_line_nums(ctx.check(
+      node_to_line_nums(ctx.check(nil,
         <<-RUBY
           a = fun1(1, 'hi')
           b = fun1(3.4, 4.4)
@@ -435,7 +435,7 @@ class TestLucidCheck < Test::Unit::TestCase
     assert_equal(
       [[4, :var_type, 'a', 'Integer', 'String'],
        [6, :block_arg_type, 'fun2', '(Integer) > Integer', '(Integer) > Nil']],
-      node_to_line_nums(ctx.check(
+      node_to_line_nums(ctx.check(nil,
         <<-RUBY
           a = 123
           a = a.fun1('unused')

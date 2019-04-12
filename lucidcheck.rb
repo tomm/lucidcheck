@@ -15,10 +15,11 @@ if __FILE__ == $0
   ARGV.each do |filename|
     source = File.open(filename).read
 
-    errors = Context.new.check(source)
+    ctx = Context.new
+    errors = ctx.check(filename, source)
     if !errors.empty?
       got_errors = true
-      puts errors.map{|e| Context.error_msg(filename, e)}.join("\n")
+      puts errors.map{|e| ctx.error_msg(e)}.join("\n")
       puts "FAIL! #{filename}: #{errors.length} issues found."
     else
       puts "Pass! #{filename}"

@@ -12,7 +12,8 @@ class Context
     @robject
   end
 
-  def self.error_msg(filename, e)
+  def error_msg(e)
+    filename = @node_filename_map[e[0]]
     "#{filename}:#{e[0]&.loc&.line}:#{e[0]&.loc&.column&.+ 1}: E: " +
       case e[1]
       when :invalid_safe_send
@@ -92,11 +93,20 @@ class Context
 
     @errors = []
     @annotations = {}
+    @node_filename_map = {}
     @scopestack = [FnScope.new(nil, nil, nil, @robject, nil, nil)]
   end
 
-  def check(source)
+  def check(filename, source)
     @errors.clear
+    _check(filename, source)
+    check_function_type_inference_succeeded(@robject)
+    @errors
+  end
+
+  private
+
+  def _check(filename, source)
     begin
       lines = source.split("\n")
       @annotations = (1..lines.length).to_a.zip(lines).select { |item|
@@ -111,13 +121,17 @@ class Context
       # XXX todo - get line number
       @errors << [nil, :parse_error, e.to_s]
     else
+      _build_node_filename_map(filename, ast)
       n_expr(ast)
-      check_function_type_inference_succeeded(@robject)
     end
-    @errors
   end
 
-  private
+  def _build_node_filename_map(filename, node)
+    @node_filename_map[node] = filename
+    if node.methods.include?(:children) && node.children != nil
+      node.children.each { |n| _build_node_filename_map(filename, n) if n != nil }
+    end
+  end
 
   class Rblock
     attr_reader :sig, :body_node, :fn_scope
@@ -136,8 +150,17 @@ class Context
       @rundefined
     else
       path = args[0].children[0]
-      puts "Ignoring require '#{path}'"
-      @rboolean
+      puts "Following require '#{path}'"
+      path += '.rb' if !path.end_with?('.rb')
+      begin
+        source = File.open(path).read
+      rescue => e
+        @errors << [args.first, :require_error, e.to_s]
+        @rundefined
+      else
+        _check(path, source)
+        @rboolean
+      end
     end
   end
 
