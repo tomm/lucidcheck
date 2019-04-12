@@ -30,6 +30,26 @@ class Rbindable
   end
 end
 
+class BuiltinSig < FnSig
+  def initialize(arg_types)
+    super(nil, arg_types)
+  end
+end
+
+class Rbuiltin < Rbindable
+  attr_reader :sig
+  def initialize(name, sig, fn)
+    super(name, nil)
+    @fn = fn
+    # only actually need the args bit of sig. return type determined by what call() returns
+    @sig = sig
+  end
+
+  def call(*args)
+    @fn.call(*args)
+  end
+end
+
 # when type inference fails
 class Rundefined < Rbindable
   def initialize

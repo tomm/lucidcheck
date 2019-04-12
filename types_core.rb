@@ -24,7 +24,6 @@ def make_robject
   robject.define(Rconst.new('ARGV', rarray[[rstring]]))
   robject.define(Rlvar.new('$0', rstring))
   robject.define(Rfunc.new('!', rboolean, []))
-  robject.define(Rfunc.new('require', rnil, [rstring]))
   robject.define(Rfunc.new('puts', rnil, [rstring]))
   robject.define(Rfunc.new('p', _T, [_T]))
   robject.define(Rfunc.new('exit', rnil, [rinteger]))

@@ -63,6 +63,8 @@ class Context
         "Parse error: #{e[2]}"
       when :rescue_exception_type
         "Invalid exception type in 'rescue': #{e[2]}"
+      when :require_error
+        e[2]
       when :annotation_error
         e[2]
       else
@@ -80,10 +82,13 @@ class Context
     @rself = @robject.lookup(:genericSelf)[0]
     @rnil = @robject.lookup('Nil')[0]
     @rboolean = @robject.lookup('Boolean')[0]
+    @rstring = @robject.lookup('String')[0]
     @rarray = @robject.lookup('Array')[0]
     @rhash = @robject.lookup('Hash')[0]
     @rrange = @robject.lookup('Range')[0]
     @rundefined = Rundefined.new
+
+    @robject.define(Rbuiltin.new('require', BuiltinSig.new([@rstring]), method(:do_require)))
 
     @errors = []
     @annotations = {}
@@ -122,6 +127,17 @@ class Context
       @sig.add_named_args(arg_names.map { |name| [name, nil] })
       @fn_scope = fn_scope
       @body_node = body_node
+    end
+  end
+
+  def do_require(args)
+    if args[0].type != :str
+      @errors << [args.first, :require_error, "Require can only take a string literal"]
+      @rundefined
+    else
+      path = args[0].children[0]
+      puts "Ignoring require '#{path}'"
+      @rboolean
     end
   end
 
@@ -580,7 +596,8 @@ class Context
     name = node.children[1].to_s
     type_scope = node.children[0] ? n_expr(node.children[0]) : scope_top.in_class
     name = node.children[1].to_s
-    arg_types = node.children[2..-1].map {|n| n_expr(n) }
+    arg_nodes = node.children[2..-1]
+    arg_types = arg_nodes.map {|n| n_expr(n) }
 
     return @rundefined if type_scope.kind_of?(Rundefined)
 
@@ -600,10 +617,15 @@ class Context
     if fn == nil
       @errors << [node, :fn_unknown, name, type_scope.name]
       @rundefined
-    elsif !fn.kind_of?(Rfunc)
-      @errors << [node, :not_a_function, name]
-      @rundefined
-    else
+    elsif fn.kind_of?(Rbuiltin)
+      errs = fn.sig.call_typecheck?(node, fn.name, arg_types, {}, nil, type_scope)
+      if errs.empty?
+        fn.call(arg_nodes)
+      else
+        @errors.concat(errs)
+        @rundefined
+      end
+    elsif fn.kind_of?(Rfunc)
       ret = function_call(type_scope, call_scope, fn, node, arg_types, block)
 
       if node.type == :csend
@@ -611,6 +633,9 @@ class Context
       else
         ret
       end
+    else
+      @errors << [node, :not_a_function, name]
+      @rundefined
     end
   end
 
