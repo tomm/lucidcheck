@@ -166,10 +166,11 @@ class WeakScope < Scope
   def is_constructor; @parent.is_constructor end
   def caller_node; @parent.caller_node end
   def in_class; @parent.in_class end
+  def add_return_val(val); @parent.add_return_val(val) end
 end
 
 class FnScope < Scope
-  attr_reader :passed_block, :is_constructor, :caller_node, :in_class
+  attr_reader :passed_block, :is_constructor, :caller_node, :in_class, :return_vals
   #: fn(Rmetaclass | Rclass, Rblock | nil)
   def initialize(caller_node, caller_scope, fn_body_node, in_class, parent_scope, passed_block, is_constructor: false)
     @in_class = in_class
@@ -180,6 +181,11 @@ class FnScope < Scope
     @caller_node = caller_node
     @caller_scope = caller_scope
     @fn_body_node = fn_body_node
+    @return_vals = []
+  end
+
+  def add_return_val(val)
+    @return_vals << val
   end
 
   def is_fn_body_node_in_stack(node)
@@ -359,12 +365,29 @@ class Rbindable
   def new_inst
     self
   end
+
+  def rinstance_of?(other)
+    false
+  end
+
+  def parent
+    nil
+  end
+
+  def add_template_params_scope(mut_template_types)
+  end
 end
 
 # when type inference fails
 class Rundefined < Rbindable
   def initialize
     super(:undefined, nil)
+  end
+end
+
+class Rretvoid < Rbindable
+  def initialize
+    super(:retvoid, nil)
   end
 end
 
@@ -440,9 +463,6 @@ class Rmetaclass < Rbindable
     @metaclass_for = metaclass_for
   end
 
-  def add_template_params_scope(mut_template_types)
-  end
-
   def lookup(method_name)
     [@namespace[method_name], self]
   end
@@ -460,6 +480,16 @@ class Rclass < Rbindable
     @parent = parent_class
     @namespace = {}
     @template_params = template_params
+  end
+
+  def rinstance_of?(other)
+    if other.instance_of?(Rclass)
+      p = @parent
+      while p != nil && p != other do; p = p.parent end
+      p == other
+    else
+      false
+    end
   end
 
   def add_template_params_scope(mut_template_types)
@@ -548,20 +578,27 @@ class Rconcreteclass < Rbindable
   end
 end
 
+def most_recent_common_ancestor(types)
+  a = types.first
+  while a != nil && !types.map { |t| t.rinstance_of?(a) }.all? do
+    a = a.parent
+  end
+  a
+end
+
 class Rsumtype < Rbindable
   attr_reader :options
   #: fn(Array[Rbindable])
   def initialize(types)
     super(nil, nil)
-    @options = types
-      .map { |t| if t.is_a?(Rsumtype) then t.options else [t] end }
-      .flatten
-      .uniq
-      .sort_by { |a| a.name.to_s }
+    @options = types.sort_by { |a| a.name.to_s }
+    # base_type is most recent common parent type of all in 'types'
+    # XXX should compute rather than pass in
+    @base_type = most_recent_common_ancestor(types)
   end
 
   def lookup(name)
-    [nil, nil]
+    @base_type&.lookup(name) || [nil, nil]
   end
 
   def name
@@ -573,12 +610,7 @@ class Rsumtype < Rbindable
   end
 
   def to_non_optional
-    types = @options.reject { |o| o.name == 'Nil' }
-    if types.length == 1
-      types.first
-    else
-      Rsumtype.new(types)
-    end
+    sum_of_types(@options.reject { |o| o.name == 'Nil' })
   end
 
   def ==(other)
@@ -587,6 +619,23 @@ class Rsumtype < Rbindable
     else
       @options.map { |o| o == other }.any?
     end
+  end
+end
+
+# Only returns a sum type if number of types > 1
+def sum_of_types(types, fn_ret: false)
+  t = types.flatten
+           .map { |t| if t.is_a?(Rsumtype) then t.options else [t] end }
+           .flatten
+           .uniq
+  t.reject! { |t| t.is_a?(Rretvoid) } if fn_ret
+  case t.length
+  when 0
+    raise CheckerBug, "sum_type with zero cases"
+  when 1
+    t.first
+  else
+    Rsumtype.new(t)
   end
 end
 
@@ -910,6 +959,9 @@ class Context
       n_irange(node)
     when :case
       n_case(node)
+    when :return
+      scope_top.add_return_val(n_expr(node.children[0]))
+      Rretvoid.new
     when :const
       c = scope_top.lookup(node.children[1].to_s)[0]
       if c
@@ -944,13 +996,7 @@ class Context
       }
     # catch-all (else)
     whens << n_expr(node.children.last)
-    whens.uniq!
-
-    if whens.length == 1
-      whens.first
-    else
-      Rsumtype.new(whens)
-    end
+    sum_of_types(whens)
   end
 
   def n_irange(node)
@@ -982,13 +1028,10 @@ class Context
       # assign exception to an lvar
       raise CheckerBug, 'expected lvasgn in resbody' unless node.children[1].type == :lvasgn
       name = node.children[1].children[0].to_s
-      type = case _exceptions.length
-             when 0
+      type = if _exceptions.length == 0
                @robject.lookup('StandardError')[0]
-             when 1
-               _exceptions.first
              else
-               Rsumtype.new(_exceptions)
+               sum_of_types(_exceptions)
              end
       puts "assigning #{type.name} to #{name}"
       rbinding, _ = scope_top.lookup(name)
@@ -1024,13 +1067,13 @@ class Context
       if _resbody == _begin
         _resbody
       else
-        Rsumtype.new([_resbody, _begin])
+        sum_of_types([_resbody, _begin])
       end
     else
       if _resbody == _else
         _resbody
       else
-        Rsumtype.new([_resbody, _else])
+        sum_of_types([_resbody, _else])
       end
     end
   end
@@ -1052,11 +1095,8 @@ class Context
       if cond != @rboolean
         @errors << [node, :expected_boolean, cond.name]
       end
-      if type1 == type2
-        type1
-      else
-        Rsumtype.new([type1, type2])
-      end
+
+      sum_of_types([type1, type2])
     }
   end
 
@@ -1279,7 +1319,7 @@ class Context
       ret = function_call(type_scope, call_scope, fn, node, arg_types, block)
 
       if node.type == :csend
-        Rsumtype.new([@rnil, ret])
+        sum_of_types([@rnil, ret])
       else
         ret
       end
@@ -1320,7 +1360,7 @@ class Context
       else
         # find function return type by evaluating body with concrete argument types in scope
         push_scope(function_scope)
-        ret = n_expr(fn.body)
+        ret = sum_of_types([n_expr(fn.body), function_scope.return_vals], fn_ret: true)
         if !fn.is_constructor
           if fn.return_type == nil
             fn.return_type = ret

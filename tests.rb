@@ -934,9 +934,9 @@ class TestLucidCheck < Test::Unit::TestCase
   def test_csend
     assert_equal(
       [[6, :var_type, 'x', 'Integer | Nil | String', 'Float'],
-       [7, :fn_unknown, 'to_s', 'Integer | String'],
        [9, :var_type, 'a', 'Nil | String', 'Integer'],
-       [10, :invalid_safe_send, 'Integer']],
+       [10, :fn_unknown, 'whaa', 'Integer | String'],
+       [11, :invalid_safe_send, 'Integer']],
       parse_str(
         <<-RUBY
           w = if true then 'a' else nil end
@@ -948,6 +948,7 @@ class TestLucidCheck < Test::Unit::TestCase
           x&.to_s
           a = y&.to_s
           a = 1
+          x&.whaa
           z&.to_s
         RUBY
       )
