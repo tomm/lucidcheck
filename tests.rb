@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
-require './lucidcheck'
 require 'test/unit'
+require './context'
 
 def node_to_line_nums(errors)
   errors.map { |es| [[es[0]&.loc&.line], es[1..-1]].flatten }
