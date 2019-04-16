@@ -12,8 +12,12 @@ class Context
     @robject
   end
 
+  def filename_of_node(node)
+    @node_filename_map[node]
+  end
+
   def error_msg(e)
-    filename = @node_filename_map[e[0]]
+    filename = filename_of_node(e[0])
     "#{filename}:#{e[0]&.loc&.line}:#{e[0]&.loc&.column&.+ 1}: E: " +
       case e[1]
       when :invalid_safe_send
@@ -67,6 +71,8 @@ class Context
       when :require_error
         e[2]
       when :annotation_error
+        e[2]
+      when :checker_bug
         e[2]
       else
         e.to_s
@@ -250,6 +256,8 @@ class Context
       # ignore for now :)
     when :if
       n_if(node)
+    when :while
+      n_while(node)
     when :float
       lookup_type(@robject, 'Float')
     when :int
@@ -298,7 +306,9 @@ class Context
         @rundefined
       end
     else
-      raise "Line #{node.loc.line}: unknown AST node type #{node.type}:\r\n#{node}"
+      @errors << [node, :checker_bug, "Lucidcheck Bug! This construct (#{node.type}) is not known"]
+      puts "BUG! #{filename_of_node(node)}, line #{node.loc.line}: unknown AST node type #{node.type}:\r\n#{node}"
+      @rundefined
     end
   end
 
@@ -411,6 +421,19 @@ class Context
     v = yield
     pop_scope()
     v
+  end
+
+  def n_while(node)
+    # XXX need to implement break
+    weak_scoped {
+      cond = n_expr(node.children[0])
+      body = n_expr(node.children[1])
+
+      if cond != @rboolean
+        @errors << [node, :expected_boolean, cond.name]
+      end
+    }
+    @rundefined
   end
 
   def n_if(node)
