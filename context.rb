@@ -749,7 +749,7 @@ class Context
       # define lvars from arguments
       fn.sig.args.each { |a| function_scope.define_lvar(Rlvar.new(a[0], a[1])) }
 
-      if scope_top.is_fn_body_node_in_stack(fn.body)
+      if scope_top.is_identical_fn_call_in_stack?(fn.body, block)
         # never actually recurse! we want this bastible to finish
         if fn.return_type == nil
           fn.return_type = Rrecursion.new

@@ -18,6 +18,7 @@ def make_robject
   rhash    = robject.define(Rclass.new('Hash', robject, template_params: [_K, _V]))
   rrange   = robject.define(Rclass.new('Range', robject, template_params: [_T]))
   rfile    = robject.define(Rclass.new('File', robject))
+  # or is he? :-/
   rexception = robject.define(Rclass.new('Exception', robject))
   rstandarderror = robject.define(Rclass.new('StandardError', rexception))
   rruntimeerror = robject.define(Rclass.new('RuntimeError', rstandarderror))
