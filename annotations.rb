@@ -95,9 +95,7 @@ class AnnotationParser
         return_type = @lookup.('Nil')[0]
       end
 
-      t = Rfunc.new(nil, return_type, args, block_sig: block_sig)
-      puts "making turd #{t.sig.to_s}"
-      t
+      Rfunc.new(nil, return_type, args, block_sig: block_sig)
     else
       @lookup.(eat)[0]
     end

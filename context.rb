@@ -395,7 +395,6 @@ class Context
       end
     }.compact
 
-    p node.children[1]
     if node.children[1] != nil
       # assign exception to an lvar
       raise 'expected lvasgn in resbody' unless node.children[1].type == :lvasgn
@@ -405,7 +404,6 @@ class Context
              else
                sum_of_types(_exceptions)
              end
-      puts "assigning #{type.name} to #{name}"
       rbinding, _ = scope_top.lookup(name)
 
       if type.is_a?(Rundefined)
