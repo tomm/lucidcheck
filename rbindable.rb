@@ -145,13 +145,17 @@ class Rmetaclass < Rbindable
 end
 
 class Rclass < Rbindable
-  attr_reader :metaclass, :namespace, :parent
+  attr_reader :metaclass, :namespace, :parent, :template_params
   def initialize(name, parent_class, template_params: [])
     @metaclass = Rmetaclass.new(name, self)
     super(name, @metaclass)
     @parent = parent_class
     @namespace = {}
     @template_params = template_params
+  end
+
+  def max_template_params
+    @template_params.length
   end
 
   def rinstance_of?(other)
@@ -182,8 +186,15 @@ class Rclass < Rbindable
     @namespace[bind_to || rbindable.name] = rbindable
   end
 
+  # permits under-specialization. this is needed for tuples, which have
+  # have 8 generic params (max tuple length 8) but n-tuple only uses n
   def [](specialization)
-    Rconcreteclass.new(self, @template_params.zip(specialization).to_h)
+    Rconcreteclass.new(
+      self, 
+      specialization.zip(@template_params)
+                    .map {|kv| [kv[1], kv[0]]}
+                    .to_h
+    )
   end
 
   def new_generic_specialization

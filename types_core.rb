@@ -13,6 +13,8 @@ def make_robject
   rfloat   = robject.define(Rclass.new('Float', robject))
   rboolean = robject.define(Rclass.new('Boolean', robject))
   rarray   = robject.define(Rclass.new('Array', robject, template_params: [_T]))
+  rtuple   = robject.define(Rclass.new('Tuple', robject, 
+                                       template_params: ([TemplateType]*16).map(&:new)))
   rhash    = robject.define(Rclass.new('Hash', robject, template_params: [_K, _V]))
   rrange   = robject.define(Rclass.new('Range', robject, template_params: [_T]))
   rfile    = robject.define(Rclass.new('File', robject))

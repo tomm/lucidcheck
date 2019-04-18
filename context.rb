@@ -54,8 +54,8 @@ class Context
         "Expected '#{e[2]}' in when clause, but found '#{e[3]}"
       when :var_type
         "Cannot reassign variable '#{e[2]}' of type #{e[3]} with value of type #{e[4]}"
-      when :array_mixed_types
-        "Mixed types not permitted in array literal."
+      when :tuple_too_big
+        "Tuple with too many values. Maximum is #{@rtuple.max_template_params}"
       when :hash_mixed_types
         "Mixed types not permitted in hash literal."
       when :inference_failed
@@ -74,6 +74,8 @@ class Context
         e[2]
       when :checker_bug
         e[2]
+      when :tuple_index
+        "Invalid tuple index for type '#{e[2]}'"
       else
         e.to_s
       end
@@ -90,12 +92,45 @@ class Context
     @rnil = @robject.lookup('Nil')[0]
     @rboolean = @robject.lookup('Boolean')[0]
     @rstring = @robject.lookup('String')[0]
+    @rinteger = @robject.lookup('Integer')[0]
     @rarray = @robject.lookup('Array')[0]
+    @rtuple = @robject.lookup('Tuple')[0]
     @rhash = @robject.lookup('Hash')[0]
     @rrange = @robject.lookup('Range')[0]
     @rundefined = Rundefined.new
 
     @robject.define(Rbuiltin.new('require', BuiltinSig.new([@rstring]), method(:do_require)))
+
+    @rtuple.define(Rbuiltin.new('[]', BuiltinSig.new([@rinteger]), ->(node, rself, args) {
+      index = args[0].children[0]
+      type = rself.specialization[ rself.class.template_params[index] ]
+      if type == nil
+        @errors << [args[0], :tuple_index, rself.name]
+        @rundefined
+      else
+        type
+      end
+    }))
+
+    @rtuple.define(Rbuiltin.new('[]=', nil, ->(node, rself, args) {
+      index = args[0].children[0]
+      val = n_expr(args[1])
+      if !index.is_a?(Integer)
+        @errors << [args[0], :tuple_index, rself.name]
+        @rundefined
+      else
+        type = rself.specialization[ rself.class.template_params[index] ]
+        if type == nil
+          @errors << [args[0], :tuple_index, rself.name]
+          @rundefined
+        elsif type != val
+          @errors << [args[1], :fn_arg_type, '[]=', "Integer,#{type}", "Integer,#{val}"]
+          @rundefined
+        else
+          type
+        end
+      end
+    }))
 
     @errors = []
     @annotations = {}
@@ -150,7 +185,7 @@ class Context
     end
   end
 
-  def do_require(args)
+  def do_require(node, rself, args)
     if args[0].type != :str
       @errors << [args.first, :require_error, "Require can only take a string literal"]
       @rundefined
@@ -530,8 +565,11 @@ class Context
       fst_type = contents.first
       if contents.map {|v| v == fst_type }.all?
         @rarray[[fst_type]]
+      elsif contents.length <= @rtuple.max_template_params
+        @rtuple[contents]
       else
-        @errors << [node, :array_mixed_types]
+        # XXX bad error messsage. maybe something about tuple length
+        @errors << [node, :tuple_too_big]
         @rundefined
       end
     end
@@ -664,9 +702,9 @@ class Context
       @errors << [node, :fn_unknown, name, type_scope.name]
       @rundefined
     elsif fn.kind_of?(Rbuiltin)
-      errs = fn.sig.call_typecheck?(node, fn.name, arg_types, {}, nil, type_scope)
+      errs = fn.sig.nil? ? [] : fn.sig.call_typecheck?(node, fn.name, arg_types, {}, nil, type_scope)
       if errs.empty?
-        fn.call(arg_nodes)
+        fn.call(node, type_scope, arg_nodes)
       else
         @errors.concat(errs)
         @rundefined

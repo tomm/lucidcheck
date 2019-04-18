@@ -523,15 +523,16 @@ class TestLucidCheck < Test::Unit::TestCase
 
   def test_array_literal
     assert_equal(
-      [[4, :array_mixed_types],
-       [5, :fn_arg_type, '==', 'Array<generic>', 'Array<String>']],
+      [[5, :fn_arg_type, '==', 'Array<generic>', 'Array<String>'],
+       [6, :fn_arg_type, '==', 'Array<generic>', 'Tuple<String,Integer>']],
       parse_str(
         <<-RUBY
           a = []
           b = [1,2,3]
           c = ['hello', 'dude']
-          d = ['bad', 2]  # fail
+          d = ['bad', 2]
           a == c  # fail
+          a == d  # fail
           a.push('hi')
           a == c
         RUBY
@@ -965,6 +966,30 @@ class TestLucidCheck < Test::Unit::TestCase
           puts "#{a} #{b.join(\',\')}"
           puts "#{a} #{b.whatever}"
           '
+      )
+    )
+  end
+
+  def test_tuple_basic
+    assert_equal(
+      [[2, :var_type, 'x', 'Tuple<Integer,String>', 'Integer'],
+       [5, :var_type, 'a', 'Integer', 'String'],
+       [8, :fn_arg_type, '[]=', 'Integer,Integer', 'Integer,Symbol'],
+       [9, :tuple_index, 'Tuple<Integer,String>']],
+      parse_str(
+        <<-RUBY
+          x = [1, 'hi']
+          x = 2  # fails
+          a = x[0]
+          b = x[1]
+          a = b  # fails
+          x[0] = 1
+          x[1] = 'oi'
+          x[0] = :fails!  # fails
+          x[:no!] = 1  # fails
+          y = [2, 'oi']
+          y = x
+        RUBY
       )
     )
   end
