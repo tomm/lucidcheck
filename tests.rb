@@ -1069,4 +1069,35 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
   end
+
+  def test_generic_annotation
+    assert_equal(
+      [[3, :fn_return_type, 'e', 'Array<Float>', 'Array<Integer>']],
+      parse_str(
+        <<-RUBY
+          #: fn(Array<Integer>) -> Array<Float>
+          def e(a); a end
+          e([1,2,3])
+        RUBY
+      )
+    )
+  end
+
+  def test_annotation_robustness
+    assert_equal(
+      [[2, :annotation_error, "Unknown type in annotation: 'nonsense'"],
+       [5, :annotation_error, "Unknown type in annotation: 'blah'"]],
+      parse_str(
+        <<-RUBY
+          #: fn(nonsense<Integer>)
+          def e(a); a end
+          e([1,2,3])
+          #: fn(Array<blah>)
+          def f(a); a end
+          e([1,2,3])
+          f([1,2,3])
+        RUBY
+      )
+    )
+  end
 end

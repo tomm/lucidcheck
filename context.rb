@@ -1,8 +1,8 @@
 require 'pry'
-require './annotations'
 require './scopes'
 require './fnsig'
 require './rbindable'
+require './annotations'
 require './types_core'
 
 class Context
@@ -138,6 +138,7 @@ class Context
 
     @errors = []
     @annotations = {}
+    @required = []
     @node_filename_map = {}
     @scopestack = [FnScope.new(nil, nil, nil, @robject, nil, nil)]
   end
@@ -195,14 +196,17 @@ class Context
       @rundefined
     else
       path = args[0].children[0]
-      puts "Following require '#{path}'"
       path += '.rb' if !path.end_with?('.rb')
+      # already done!
+      return @rboolean if @required.include?(path)
+      puts "Following require '#{path}'"
       begin
         source = File.open(path).read
       rescue => e
         @errors << [args.first, :require_error, e.to_s]
         @rundefined
       else
+        @required << path
         _check(path, source)
         @rboolean
       end

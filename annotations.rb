@@ -1,13 +1,15 @@
+require './rbindable.rb'
 # type annotation examples:
 # String | Integer
 # fn(Integer,String) -> String
 # fn(fn() -> String)
 # Array<Integer>
-# [Integer, String, Boolean]
+# Tuple<Integer, String, Boolean>
+## not supported yet:
 # fn<T>(T,T) -> T
 # fn<T,U>(fn(T) -> U, Array<T>) -> Array<U>
 class AnnotationParser
-  class TokenizerError < RuntimeError; end
+  class AnnotationError < RuntimeError; end
 
   def initialize(tokens, lookup)
     @tokens = tokens
@@ -41,33 +43,48 @@ class AnnotationParser
     tokens
   end
 
-  #: fn() -> [Rbindable, String | Nil]
+  #: fn() -> Tuple<Rbindable, String | Nil>
   def get_type
     type = parse_type
-    raise TokenizerError, "malformed annotation" unless @tokens.empty?
+    raise AnnotationError, "malformed annotation" unless @tokens.empty?
     [type, nil]
-  rescue TokenizerError => e
+  rescue AnnotationError => e
     [nil, e.to_s]
   end
 
   private
 
+  def get_type_list
+    types = []
+    loop {
+      types.push(parse_type) if !has ')'
+      break unless has ','
+      expect! ','
+    }
+    types
+  end
+
   def parse_block_sig
     expect! '&'
     expect! '('
-    args = []
-    loop {
-      args.push(parse_type) if !has ')'
-      break unless has ','
-    }
+    args = get_type_list
     expect! ')'
     return_type = if has '->'
       eat
       parse_type
     else
-      @lookup.('Nil')[0]
+      lookup('Nil')
     end
     FnSig.new(return_type, args)
+  end
+
+  def lookup(name)
+    type = @lookup.(name)[0]
+    if type.nil?
+      raise AnnotationError, "Unknown type in annotation: '#{name}'"
+    else
+      type
+    end
   end
 
   def parse_type
@@ -92,12 +109,20 @@ class AnnotationParser
         eat
         return_type = parse_type
       else
-        return_type = @lookup.('Nil')[0]
+        return_type = lookup('Nil')
       end
 
       Rfunc.new(nil, return_type, args, block_sig: block_sig)
     else
-      @lookup.(eat)[0]
+      type = lookup(eat)
+      if has '<'
+        expect! '<'
+        specializations = get_type_list
+        expect! '>'
+        type[specializations]
+      else
+        type
+      end
     end
   end
 
@@ -113,7 +138,7 @@ class AnnotationParser
 
   def expect!(val)
     if !has(val)
-      raise TokenizerError, "expected #{val} but found #{@tokens.first} in type annotation"
+      raise AnnotationError, "expected #{val} but found #{@tokens.first} in type annotation"
     else
       eat
     end
