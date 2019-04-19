@@ -83,7 +83,7 @@ class FnScope < Scope
     @local_scope[rbindable.name] = rbindable
   end
 
-  def define_ivar(rbindable)
-    @in_class.define(rbindable)
+  def define_ivar(name, rbindable)
+    @in_class.define(rbindable, bind_to: name)
   end
 end

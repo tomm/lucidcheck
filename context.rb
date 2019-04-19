@@ -389,7 +389,7 @@ class Context
         @errors << [node, :ivar_unknown, node.children[0].to_s]
         @rundefined
       else
-        ivar.type
+        ivar
       end
     when :lvar
       lvar = scope_top.lookup(node.children[0].to_s)[0]
@@ -779,10 +779,10 @@ class Context
       if scope_top.is_constructor == false
         @errors << [node, :ivar_assign_outside_constructor, name]
       else
-        scope_top.define_ivar(Rlvar.new(name, type))
+        scope_top.define_ivar(name, type)
       end
-    elsif !scope_top.lookup(name)[0].type.supertype_of?(type)
-      @errors << [node, :var_type, name, scope_top.lookup(name)[0].type.name, type.name]
+    elsif !scope_top.lookup(name)[0].supertype_of?(type)
+      @errors << [node, :var_type, name, scope_top.lookup(name)[0].name, type.name]
     else
       # binding already existed. types match. cool
     end
@@ -817,7 +817,7 @@ class Context
     if type == nil
       # error already reported. do nothing
     elsif scope_top.lookup(name)[0] == nil
-      scope_top.define_ivar(Rconst.new(name, type))
+      scope_top.define_ivar(name, type)
     else
       @errors << [node, :const_redef, name]
     end
@@ -837,8 +837,10 @@ class Context
       return @rundefined
     end
     c = scope.lookup(node.children[1].to_s)[0]
-    if c
-      c.type
+    if c&.is_a?(Rclass)
+      c.metaclass
+    elsif c != nil
+      c.type ? c.type : c
     else
       @errors << [node, :const_unknown, node.children[1].to_s, scope.name]
       @rundefined

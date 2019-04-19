@@ -162,7 +162,7 @@ class Rclass < Rbindable
   attr_reader :metaclass, :namespace, :parent, :template_params
   def initialize(name, parent_class, template_params: [])
     @metaclass = Rmetaclass.new(name, self)
-    super(name, @metaclass)
+    super(name, nil)
     @parent = parent_class
     @namespace = {}
     @template_params = template_params
