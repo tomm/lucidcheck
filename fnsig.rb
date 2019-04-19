@@ -3,6 +3,8 @@ class FnSig
 
   def initialize(return_type, anon_args)
     @args = []
+    @optargs = []
+    @kwargs = []
     @return_type = return_type
     add_anon_args(anon_args)
   end
@@ -10,6 +12,16 @@ class FnSig
   #: fn(Array<Rbindable>)
   def add_anon_args(args)
     args.each { |a| @args << [nil, a] }
+  end
+
+  #: fn(Array<Tuple<String, Rbindable>>)
+  def add_kw_args(args)
+    @kwargs.concat(args)
+  end
+
+  #: fn(Array<Tuple<String, Rbindable>>)
+  def add_opt_args(args)
+    @optargs.concat(args)
   end
 
   # named as in def my_func(x, y, z). ie not keyword args

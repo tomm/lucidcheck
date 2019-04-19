@@ -120,6 +120,16 @@ class Rfunc < Rbindable
     @sig.add_named_args(arg_name_type)
   end
 
+  #: fn(Array<Tuple<String, Rbindable>>)
+  def add_kw_args(arg_name_type)
+    @sig.add_kw_args(arg_name_type)
+  end
+
+  #: fn(Array<Tuple<String, Rbindable>>)
+  def add_opt_args(arg_name_type)
+    @sig.add_opt_args(arg_name_type)
+  end
+
   def return_type=(type)
     @sig.return_type = type
   end

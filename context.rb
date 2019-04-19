@@ -988,72 +988,82 @@ class Context
     end
   end
 
+  def parse_function_args_def(args_node)
+    all_args = args_node.to_a
+    arg_name_type = all_args
+      .select { |a| a.type == :arg }
+      .map{ |a| [a.children[0].to_s, nil] }
+    optarg_name_type = all_args
+      .select { |a| a.type == :optarg }
+      .map { |a| [a.children[0].to_s, n_expr(a.children[1])] }
+    kwarg_name_type = all_args
+      .select { |a| a.type == :kwoptarg }
+      .map { |a| [a.children[0].to_s, n_expr(a.children[1])] }
+
+    raise "bug in n_def. lost some arguments" unless all_args.length == 
+      arg_name_type.length + optarg_name_type.length + kwarg_name_type.length
+
+    [arg_name_type, optarg_name_type, kwarg_name_type]
+  end
+
+  def define_constructor(node, args_node, fn_body, on_class)
+    if get_annotation_for_node(node)
+      @errors << [node, :annotation_error, "Annotations not (yet) supported on constructors"]
+    end
+    arg_name_type, optarg_name_type, kwarg_name_type = parse_function_args_def(args_node)
+    # assume return type for 'new' method
+    fn = Rfunc.new('new', on_class, is_constructor: true)
+    fn.add_named_args(arg_name_type)
+    fn.add_kw_args(kwarg_name_type)
+    fn.add_opt_args(optarg_name_type)
+    fn.node = node
+    fn.body = fn_body
+    on_class.metaclass.define(fn)
+  end
+
+  def define_normal_method(node, name, args_node, fn_body, on_class)
+    arg_name_type, optarg_name_type, kwarg_name_type = parse_function_args_def(args_node)
+    annot_type = get_annotation_for_node(node)
+
+    if annot_type
+      fn = annot_type
+      fn.name = name
+      # XXX update for kwarg and optarg nums!! XXX
+      if arg_name_type.length != annot_type.sig.args.length
+        @errors << [node, :annotation_error, "Number of arguments (#{arg_name_type.length}) does not match annotation (#{annot_type.sig.args.length})"]
+      else
+        fn.sig.name_anon_args(arg_name_type.map { |nt| nt[0] })
+      end
+    else
+      # don't know types of arguments or return type yet
+      fn = Rfunc.new(name, nil)
+      fn.add_named_args(arg_name_type)
+      fn.add_kw_args(kwarg_name_type)
+      fn.add_opt_args(optarg_name_type)
+    end
+    fn.node = node
+    fn.body = fn_body
+    # can assume return type of nil if body is empty
+    if fn.body == nil then fn.return_type = @rnil end
+    on_class.define(fn)
+  end
+
+  def n_def(node)
+    name = node.children[0].to_s
+
+    if name == 'initialize'
+      define_constructor(node, node.children[1], node.children[2], scope_top.in_class)
+    else
+      define_normal_method(node, name, node.children[1], node.children[2], scope_top.in_class)
+    end
+  end
+
   # define static method
   def n_defs(node)
     if node.children[0].type != :self
       raise "Checker bug. Expected self at #{node}"
     end
     name = node.children[1].to_s
-    # [ [name, type], ... ]
-    arg_name_type = node.children[2].to_a.map{|x| [x.children[0].to_s, nil] }
-
-    annot_type = get_annotation_for_node(node)
-    if annot_type
-      fn = annot_type
-      fn.name = name
-      if arg_name_type.length != fn.sig.args.length
-        @errors << [node, :annotation_error, "Number of arguments (#{arg_name_type.length}) does not match annotation (#{fn.sig.args.length})"]
-      else
-        fn.sig.name_anon_args(arg_name_type.map { |nt| nt[0] })
-      end
-    else
-      # don't know types of arguments or return type yet
-      fn = Rfunc.new(name, @rundefined)
-      fn.add_named_args(arg_name_type)
-    end
-    fn.node = node
-    fn.body = node.children[3]
-    if fn.body == nil then fn.return_type = @rnil end
-    scope_top.in_class.metaclass.define(fn)
-  end
-
-  def n_def(node)
-    name = node.children[0].to_s
-    # [ [name, type], ... ]
-    arg_name_type = node.children[1].to_a.map{|x| [x.children[0].to_s, nil] }
-
-    annot_type = get_annotation_for_node(node)
-
-    # define function with no known argument types (so far)
-    if name == 'initialize'
-      if annot_type
-        @errors << [node, :annotation_error, "Annotations not (yet) supported on constructors"]
-      end
-      # assume return type for 'new' method
-      fn = Rfunc.new('new', scope_top.in_class, is_constructor: true)
-      fn.add_named_args(arg_name_type)
-      fn.node = node
-      fn.body = node.children[2]
-      scope_top.in_class.metaclass.define(fn)
-    else
-      if annot_type
-        fn = annot_type
-        fn.name = name
-        if arg_name_type.length != annot_type.sig.args.length
-          @errors << [node, :annotation_error, "Number of arguments (#{arg_name_type.length}) does not match annotation (#{annot_type.sig.args.length})"]
-        else
-          fn.sig.name_anon_args(arg_name_type.map { |nt| nt[0] })
-        end
-      else
-        # don't know types of arguments or return type yet
-        fn = Rfunc.new(name, nil)
-        fn.add_named_args(arg_name_type)
-      end
-      fn.node = node
-      fn.body = node.children[2]
-      # can assume return type of nil if body is empty
-      if fn.body == nil then fn.return_type = @rnil end
-      scope_top.in_class.define(fn)
-    end
+    define_normal_method(node, name, node.children[2], node.children[3], scope_top.in_class.metaclass)
   end
 end
