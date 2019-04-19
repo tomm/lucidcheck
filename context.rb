@@ -346,6 +346,8 @@ class Context
       Rretvoid.new
     when :const
       n_const(node)
+    when :cbase
+      @robject.metaclass
     else
       @errors << [node, :checker_bug, "Lucidcheck Bug! This construct (#{node.type}) is not known"]
       puts "BUG! #{filename_of_node(node)}, line #{node.loc.line}: unknown AST node type #{node.type}:\r\n#{node}"
