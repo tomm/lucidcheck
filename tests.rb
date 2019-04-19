@@ -1113,4 +1113,69 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
   end
+
+  def test_attr_reader
+    assert_equal(
+      [[9, :var_type, 'b', 'Integer', 'Nil'],
+       [2, :ivar_unknown, '@z'],
+       [2, :fn_inference_fail, 'z']],
+      parse_str(
+        <<-RUBY
+          class A
+            attr_reader :x, :y, :z
+            def initialize()
+              @x = 1; @y = 1
+            end
+          end
+          a = A.new
+          b = a.x + a.y
+          b = nil
+          c = a.z
+        RUBY
+      )
+    )
+  end
+
+  def test_attr_writer
+    assert_equal(
+      [[9, :fn_arg_type, 'x=', 'Integer', 'Symbol'],
+       [2, :ivar_assign_outside_constructor, "@z"],
+       [2, :ivar_unknown, "@z"],
+       [2, :fn_inference_fail, "z="]],
+      parse_str(
+        <<-RUBY
+          class A
+            attr_writer :x, :z
+            def initialize();
+              @x = 1
+            end
+          end
+          a = A.new
+          a.x = 5
+          a.x = :hi  # fail
+          a.z = 45  # fail
+        RUBY
+      )
+    )
+  end
+
+  def test_attr_accessor
+    assert_equal(
+      [[9, :fn_arg_type, "x=", "Integer", "Float"]],
+      parse_str(
+        <<-RUBY
+          class A
+            attr_accessor :x
+            def initialize();
+              @x = 1
+            end
+          end
+          a = A.new
+          a.x = 5
+          a.x = 4.0
+          a.x.to_s
+        RUBY
+      )
+    )
+  end
 end

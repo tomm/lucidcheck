@@ -7,13 +7,13 @@ class FnSig
     add_anon_args(anon_args)
   end
 
-  #: fn(Array[Rbindable])
+  #: fn(Array<Rbindable>)
   def add_anon_args(args)
     args.each { |a| @args << [nil, a] }
   end
 
   # named as in def my_func(x, y, z). ie not keyword args
-  #: fn(Array[[String, Rbindable]])
+  #: fn(Array<Tuple<String, Rbindable>>)
   def add_named_args(args)
     @args.concat(args)
   end
@@ -32,7 +32,7 @@ class FnSig
     @args.map{ |a| template_types[a[1]] || a[1] }
   end
 
-  #: fn(FnSig)
+  #: fn(FnSig, Hash<TemplateType, Rbindable>)
   def structural_eql?(other_sig, template_types = {})
     ret = template_types[@return_type] || @return_type
     args_match = other_sig.args.map { |v|
@@ -107,5 +107,12 @@ class FnSig
   #: fn() > Array[error]
   def function_call_type_error(node, fn_name, passed_args, template_types)
     [node, :fn_arg_type, fn_name, args_to_s(template_types), passed_args.map(&:name).join(',')]
+  end
+end
+
+# just a function sig without the return type
+class BuiltinSig < FnSig
+  def initialize(arg_types)
+    super(nil, arg_types)
   end
 end

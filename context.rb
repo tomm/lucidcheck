@@ -1,7 +1,7 @@
 require 'pry'
 require './scopes'
-require './fnsig'
 require './rbindable'
+require './fnsig'
 require './annotations'
 require './types_core'
 
@@ -98,6 +98,7 @@ class Context
     @rnil = @robject.lookup('Nil')[0]
     @rboolean = @robject.lookup('Boolean')[0]
     @rstring = @robject.lookup('String')[0]
+    @rsymbol = @robject.lookup('Symbol')[0]
     @rinteger = @robject.lookup('Integer')[0]
     @rarray = @robject.lookup('Array')[0]
     @rtuple = @robject.lookup('Tuple')[0]
@@ -105,38 +106,7 @@ class Context
     @rrange = @robject.lookup('Range')[0]
     @rundefined = Rundefined.new
 
-    @robject.define(Rbuiltin.new('require', BuiltinSig.new([@rstring]), method(:do_require)))
-
-    @rtuple.define(Rbuiltin.new('[]', BuiltinSig.new([@rinteger]), ->(node, rself, args) {
-      index = args[0].children[0]
-      type = rself.specialization[ rself.class.template_params[index] ]
-      if type == nil
-        @errors << [args[0], :tuple_index, rself.name]
-        @rundefined
-      else
-        type
-      end
-    }))
-
-    @rtuple.define(Rbuiltin.new('[]=', nil, ->(node, rself, args) {
-      index = args[0].children[0]
-      val = n_expr(args[1])
-      if !index.is_a?(Integer)
-        @errors << [args[0], :tuple_index, rself.name]
-        @rundefined
-      else
-        type = rself.specialization[ rself.class.template_params[index] ]
-        if type == nil
-          @errors << [args[0], :tuple_index, rself.name]
-          @rundefined
-        elsif !type.supertype_of?(val)
-          @errors << [args[1], :fn_arg_type, '[]=', "Integer,#{type}", "Integer,#{val}"]
-          @rundefined
-        else
-          type
-        end
-      end
-    }))
+    define_builtins
 
     @errors = []
     @annotations = {}
@@ -172,6 +142,129 @@ class Context
       _build_node_filename_map(filename, ast)
       n_expr(ast)
     end
+  end
+
+  #: fn(Parser::AST::Node, String)
+  def define_attr_reader(node, scope, name)
+    # don't know what ivars are declared yet, so generate 'code'
+    fn = Rfunc.new(name, nil, [])
+    fn.node = node
+    fn.body = Parser::AST::Node.new(
+      :ivar,
+      [("@" + name).to_sym],
+      { location: node.location }
+    )
+
+    # add generated code to node filename map, otherwise we 
+    # can't report on errors in this code
+    _build_node_filename_map(
+      filename_of_node(node), fn.body
+    )
+
+    scope.define(fn)
+  end
+
+  #: fn(Parser::AST::Node, String)
+  def define_attr_writer(node, scope, name)
+    # don't know what ivars are declared yet, so generate 'code'
+    fn = Rfunc.new(name + "=", nil)
+    fn.add_named_args([['v', nil]])
+    fn.node = node
+    fn.body = Parser::AST::Node.new(
+      :begin,
+      [
+        Parser::AST::Node.new(
+          :ivasgn,
+          [
+            ("@" + name).to_sym,
+            Parser::AST::Node.new(:lvar, [:v])
+          ],
+          { location: node.location }
+        ),
+        Parser::AST::Node.new(
+          :ivar,
+          [("@" + name).to_sym],
+          { location: node.location }
+        )
+      ],
+      { location: node.location }
+    )
+
+    # add generated code to node filename map, otherwise we 
+    # can't report on errors in this code
+    _build_node_filename_map(
+      filename_of_node(node), fn.body
+    )
+
+    scope.define(fn)
+  end
+
+  # parse ast node of 'attr_reader', 'attr_writer', 'attr_accessor'
+  def parse_attr_builtin(node, rself, args, handler)
+    args.each { |a|
+      t = n_expr(a)
+      if !@rsymbol.supertype_of?(t)
+        @errors << [node, :general_type_error, @rsymbol.name, t.name]
+      else
+        name = a.children[0].to_s
+        handler.(a, name)
+      end
+    }
+    @rnil
+  end
+
+  def define_builtins
+    @robject.define(Rbuiltin.new('attr_reader', nil, ->(node, rself, args) {
+      parse_attr_builtin(node, rself, args, ->(node, name) {
+        define_attr_reader(node, rself, name)
+      })
+    }))
+
+    @robject.define(Rbuiltin.new('attr_writer', nil, ->(node, rself, args) {
+      parse_attr_builtin(node, rself, args, ->(node, name) {
+        define_attr_writer(node, rself, name)
+      })
+    }))
+
+    @robject.define(Rbuiltin.new('attr_accessor', nil, ->(node, rself, args) {
+      parse_attr_builtin(node, rself, args, ->(node, name) {
+        define_attr_reader(node, rself, name)
+        define_attr_writer(node, rself, name)
+      })
+    }))
+
+    @robject.define(Rbuiltin.new('require', BuiltinSig.new([@rstring]), method(:do_require)))
+
+    @rtuple.define(Rbuiltin.new('[]', BuiltinSig.new([@rinteger]), ->(node, rself, args) {
+      index = args[0].children[0]
+      type = rself.specialization[ rself.class.template_params[index] ]
+      if type == nil
+        @errors << [args[0], :tuple_index, rself.name]
+        @rundefined
+      else
+        type
+      end
+    }))
+
+    @rtuple.define(Rbuiltin.new('[]=', nil, ->(node, rself, args) {
+      index = args[0].children[0]
+      val = n_expr(args[1])
+      if !index.is_a?(Integer)
+        @errors << [args[0], :tuple_index, rself.name]
+        @rundefined
+      else
+        type = rself.specialization[ rself.class.template_params[index] ]
+        if type == nil
+          @errors << [args[0], :tuple_index, rself.name]
+          @rundefined
+        elsif !type.supertype_of?(val)
+          @errors << [args[1], :fn_arg_type, '[]=', "Integer,#{type}", "Integer,#{val}"]
+          @rundefined
+        else
+          type
+        end
+      end
+    }))
   end
 
   def _build_node_filename_map(filename, node)
@@ -804,10 +897,15 @@ class Context
       @errors << [scope_top.caller_node || node, :no_block_given]
     elsif fn.block_sig && block.sig.args.length != fn.block_sig.args.length
       @errors << [scope_top.caller_node || node, :block_arg_num, fn.name, fn.block_sig.args.length, block.sig.args.length]
-    elsif fn.body != nil # means not a purely 'header' function def (ie ruby standard lib type stubs)
+    elsif fn.body != nil
+      # function definition with function body code
       function_scope = FnScope.new(node, scope_top, fn.body, call_scope, nil, block, is_constructor: fn.is_constructor)
       # define lvars from arguments
-      fn.sig.args.each { |a| function_scope.define_lvar(Rlvar.new(a[0], a[1])) }
+      fn.sig.args.each { |a|
+        function_scope.define_lvar(
+          Rlvar.new(a[0], template_types[a[1]] || a[1])
+        )
+      }
 
       if scope_top.is_identical_fn_call_in_stack?(fn.body, block)
         # never actually recurse! we want this bastible to finish
@@ -837,7 +935,8 @@ class Context
         end
       end
     else
-      # purely 'header' function def. resolve template types
+      # purely 'header' function def. (has type stub but no code).
+      # resolve template types
       if block && fn.block_sig
         block_args = fn.block_sig.get_specialized_args(template_types)
         block_ret = block_call(node, block, block_args, template_types)

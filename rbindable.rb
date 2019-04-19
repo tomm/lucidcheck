@@ -34,12 +34,6 @@ class Rbindable
   end
 end
 
-class BuiltinSig < FnSig
-  def initialize(arg_types)
-    super(nil, arg_types)
-  end
-end
-
 class Rbuiltin < Rbindable
   attr_reader :sig
   def initialize(name, sig, fn)
@@ -107,7 +101,7 @@ class Rfunc < Rbindable
   attr_accessor :node, :body, :sig, :block_sig
   attr_reader :is_constructor
 
-  #: fn(String, Rbindable, Array[Rbindable])
+  #: fn(String, Rbindable, Array<Rbindable>)
   def initialize(name, return_type, anon_args = [], is_constructor: false, block_sig: nil)
     super(name, nil)
     @sig = FnSig.new(return_type, anon_args)
@@ -121,7 +115,7 @@ class Rfunc < Rbindable
   end
 
   # named as in def my_func(x, y, z). ie not keyword args
-  #: fn(Array[[String, Rbindable]])
+  #: fn(Array<Tuple<String, Rbindable>>)
   def add_named_args(arg_name_type)
     @sig.add_named_args(arg_name_type)
   end
@@ -280,7 +274,7 @@ end
 
 class Rsumtype < Rbindable
   attr_reader :options
-  #: fn(Array[Rbindable])
+  #: fn(Array<Rbindable>)
   def initialize(types)
     super(nil, nil)
     @options = types.sort_by { |a| a.name.to_s }
