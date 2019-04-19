@@ -80,6 +80,8 @@ class Context
         "Multiple assignment requires a tuple on the righthand side, but found '#{e[2]}'"
       when :masgn_length_mismatch
         "Number of variables to assign does not match tuple length (found #{e[3]}, need #{e[2]})"
+      when :general_type_error
+        "Expected '#{e[2]}' but found '#{e[3]}'"
       else
         e.to_s
       end
@@ -343,19 +345,7 @@ class Context
       scope_top.add_return_val(n_expr(node.children[0]))
       Rretvoid.new
     when :const
-      scope = n_expr(node.children[0])
-      if scope == @rnil
-        scope = scope_top.in_class
-      else
-        scope = scope.metaclass_for
-      end
-      c = scope.lookup(node.children[1].to_s)[0]
-      if c
-        c.type
-      else
-        @errors << [node, :const_unknown, node.children[1].to_s, scope.name]
-        @rundefined
-      end
+      n_const(node)
     else
       @errors << [node, :checker_bug, "Lucidcheck Bug! This construct (#{node.type}) is not known"]
       puts "BUG! #{filename_of_node(node)}, line #{node.loc.line}: unknown AST node type #{node.type}:\r\n#{node}"
@@ -711,6 +701,26 @@ class Context
     end
 
     type
+  end
+
+  # const lookup
+  def n_const(node)
+    scope = n_expr(node.children[0])
+    if scope == @rnil
+      scope = scope_top.in_class
+    elsif scope.is_a?(Rmetaclass)
+      scope = scope.metaclass_for
+    else
+      @errors << [node, :general_type_error, 'Class / Module', scope&.name]
+      return @rundefined
+    end
+    c = scope.lookup(node.children[1].to_s)[0]
+    if c
+      c.type
+    else
+      @errors << [node, :const_unknown, node.children[1].to_s, scope.name]
+      @rundefined
+    end
   end
 
   def n_block(node)

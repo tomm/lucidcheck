@@ -53,7 +53,8 @@ class TestLucidCheck < Test::Unit::TestCase
        [4, :var_type, 'x', 'Integer', 'String'],
        [5, :const_unknown, 'Huh', 'Object'],
        [6, :const_unknown, 'What', 'Object'],
-       [12, :const_unknown, 'B', 'Object']],
+       [12, :const_unknown, 'B', 'Object'],
+       [13, :general_type_error, 'Class / Module', 'String']],
       parse_str(
         <<-RUBY
           MyConst = 123
@@ -68,6 +69,7 @@ class TestLucidCheck < Test::Unit::TestCase
           end
           a = A::B.new
           b = B.new  # fail
+          "erm"::B.new
         RUBY
       )
     )
