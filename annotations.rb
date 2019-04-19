@@ -41,7 +41,7 @@ class AnnotationParser
     tokens
   end
 
-  #: fn() -> [type, error?]
+  #: fn() -> [Rbindable, String | Nil]
   def get_type
     type = parse_type
     raise TokenizerError, "malformed annotation" unless @tokens.empty?

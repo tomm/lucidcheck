@@ -76,6 +76,10 @@ class Context
         e[2]
       when :tuple_index
         "Invalid tuple index for type '#{e[2]}'"
+      when :masgn_rhs_type
+        "Multiple assignment requires a tuple on the righthand side, but found '#{e[2]}'"
+      when :masgn_length_mismatch
+        "Number of variables to assign does not match tuple length (found #{e[3]}, need #{e[2]})"
       else
         e.to_s
       end
@@ -279,6 +283,8 @@ class Context
       n_send(node)
     when :csend
       n_send(node)
+    when :masgn
+      n_masgn(node)
     when :ivasgn
       n_ivasgn(node)
     when :lvasgn
@@ -344,6 +350,33 @@ class Context
       @errors << [node, :checker_bug, "Lucidcheck Bug! This construct (#{node.type}) is not known"]
       puts "BUG! #{filename_of_node(node)}, line #{node.loc.line}: unknown AST node type #{node.type}:\r\n#{node}"
       @rundefined
+    end
+  end
+  
+  def n_masgn(node)
+    p node
+    lhs_node = node.children[0]
+    rhs = n_expr(node.children[1])
+    p rhs.name
+    raise "expected mlhs" if lhs_node.type != :mlhs
+    if !rhs.is_specialization_of?(@rtuple)
+      @errors << [node, :masgn_rhs_type, rhs.name]
+    elsif lhs_node.children.length != rhs.specialization.length
+      @errors << [node, :masgn_length_mismatch, rhs.specialization.length, lhs_node.children.length]
+    else
+      for index in 0...(rhs.specialization.length) do
+        name = lhs_node.children[index].children[0].to_s
+        type = rhs.specialization[ rhs.class.template_params[index] ]
+        assign_type = lhs_node.children[index].type
+        case assign_type
+        when :lvasgn
+          lvasgn(lhs_node.children[index], name, type)
+        when :ivasgn
+          ivasgn(lhs_node.children[index], name, type)
+        else 
+          @errors << [node, :checker_bug, "Unexpected in masgn: #{assign_type}"]
+        end
+      end
     end
   end
 
@@ -613,7 +646,10 @@ class Context
   def n_ivasgn(node)
     name = node.children[0].to_s
     type = n_expr(node.children[1])
+    ivasgn(node, name, type)
+  end
 
+  def ivasgn(node, name, type)
     if type.is_a?(Rundefined)
       # error already reported. do nothing
     elsif scope_top.lookup(name)[0] == nil
@@ -634,7 +670,10 @@ class Context
   def n_lvasgn(node)
     name = node.children[0].to_s
     type = n_expr(node.children[1])
+    lvasgn(node, name, type)
+  end
 
+  def lvasgn(node, name, type)
     rbinding, _ = scope_top.lookup(name)
 
     if type.is_a?(Rundefined)

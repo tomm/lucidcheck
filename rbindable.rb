@@ -22,6 +22,10 @@ class Rbindable
     false
   end
 
+  def is_specialization_of?(other)
+    false
+  end
+
   def parent
     nil
   end
@@ -267,6 +271,10 @@ class Rconcreteclass < Rbindable
     else
       false
     end
+  end
+
+  def is_specialization_of?(abstract_class)
+    self.class.equal?(abstract_class)
   end
 end
 
