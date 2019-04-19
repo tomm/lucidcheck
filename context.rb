@@ -1000,8 +1000,11 @@ class Context
       .select { |a| a.type == :kwoptarg }
       .map { |a| [a.children[0].to_s, n_expr(a.children[1])] }
 
-    raise "bug in n_def. lost some arguments" unless all_args.length == 
-      arg_name_type.length + optarg_name_type.length + kwarg_name_type.length
+    unknown_args = all_args.map(&:type).select { |t| ![:arg, :optarg, :kwoptarg].include?(t) }
+
+    if unknown_args.length > 0
+      @errors << [args_node, :checker_bug, "Unknown argument types: #{unknown_args.join(', ')}"]
+    end
 
     [arg_name_type, optarg_name_type, kwarg_name_type]
   end
