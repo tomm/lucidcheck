@@ -1,4 +1,4 @@
-require './rbindable.rb'
+require_relative 'rbindable'
 # type annotation examples:
 # String | Integer
 # fn(Integer,String) -> String

@@ -1,9 +1,9 @@
 require 'pry'
-require './scopes'
-require './rbindable'
-require './fnsig'
-require './annotations'
-require './types_core'
+require_relative 'scopes'
+require_relative 'rbindable'
+require_relative 'fnsig'
+require_relative 'annotations'
+require_relative 'types_core'
 
 class Context
   attr_reader :rself
@@ -234,6 +234,7 @@ class Context
     }))
 
     @robject.define(Rbuiltin.new('require', BuiltinSig.new([@rstring]), method(:do_require)))
+    @robject.define(Rbuiltin.new('require_relative', BuiltinSig.new([@rstring]), method(:do_require_relative)))
 
     @rtuple.define(Rbuiltin.new('[]', BuiltinSig.new([@rinteger]), ->(node, rself, args) {
       index = args[0].children[0]
@@ -287,8 +288,11 @@ class Context
     end
   end
 
-  def do_require(node, rself, args)
-    if args[0].type != :str
+  def do_require(node, rself, args, relative: false)
+    if relative == false
+      @errors << [args.first, :require_error, "Absolute require not implemented (yet ;)"]
+      @rundefined
+    elsif args[0].type != :str
       @errors << [args.first, :require_error, "Require can only take a string literal"]
       @rundefined
     else
@@ -308,6 +312,10 @@ class Context
         @rboolean
       end
     end
+  end
+
+  def do_require_relative(node, rself, args)
+    do_require(node, rself, args, relative: true)
   end
 
   def check_function_type_inference_succeeded(scope)

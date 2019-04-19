@@ -1,5 +1,5 @@
 #!/usr/bin/env ruby
-require './context'
+require_relative 'context'
 
 if __FILE__ == $0
   if ARGV.length < 1 then
