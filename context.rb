@@ -29,7 +29,7 @@ class Context
       when :fn_unknown
         "Type '#{e[3]}' has no method named '#{e[2]}'"
       when :const_unknown
-        "Constant '#{e[2]}' not found in this scope"
+        "Constant '#{e[2]}' not found in scope '#{e[3]}'"
       when :lvar_unknown
         "Local variable '#{e[2]}' not found in this scope"
       when :ivar_unknown
@@ -343,11 +343,17 @@ class Context
       scope_top.add_return_val(n_expr(node.children[0]))
       Rretvoid.new
     when :const
-      c = scope_top.lookup(node.children[1].to_s)[0]
+      scope = n_expr(node.children[0])
+      if scope == @rnil
+        scope = scope_top.in_class
+      else
+        scope = scope.metaclass_for
+      end
+      c = scope.lookup(node.children[1].to_s)[0]
       if c
         c.type
       else
-        @errors << [node, :const_unknown, node.children[1].to_s]
+        @errors << [node, :const_unknown, node.children[1].to_s, scope.name]
         @rundefined
       end
     else

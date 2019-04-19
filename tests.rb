@@ -51,8 +51,9 @@ class TestLucidCheck < Test::Unit::TestCase
     assert_equal(
       [[2, :const_redef, 'MyConst'],
        [4, :var_type, 'x', 'Integer', 'String'],
-       [5, :const_unknown, 'Huh'],
-       [6, :const_unknown, 'What']],
+       [5, :const_unknown, 'Huh', 'Object'],
+       [6, :const_unknown, 'What', 'Object'],
+       [12, :const_unknown, 'B', 'Object']],
       parse_str(
         <<-RUBY
           MyConst = 123
@@ -61,6 +62,12 @@ class TestLucidCheck < Test::Unit::TestCase
           x = 'poo'
           Huh
           z = What.new
+
+          class A
+            class B; end
+          end
+          a = A::B.new
+          b = B.new  # fail
         RUBY
       )
     )
