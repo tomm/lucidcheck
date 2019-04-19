@@ -400,7 +400,7 @@ class TestLucidCheck < Test::Unit::TestCase
     )
     # define a fn<U>(T, &block(T) > Integer) -> U
     ctx.object.define(
-      Rfunc.new('fun4', _u, [_t], block_sig: FnSig.new(ctx.object.lookup('Integer')[0], [_t]))
+      Rfunc.new('fun4', _u, [_t], block_sig: FnSig.new(ctx.object.lookup('Integer')[0].metaclass_for, [_t]))
     )
     # define fn<T>(T) -> Self
     ctx.object.define(Rfunc.new('fun5', ctx.rself, [_t]))

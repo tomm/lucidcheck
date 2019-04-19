@@ -95,15 +95,15 @@ class Context
     require "parser/current"
     @robject = make_robject()
     @rself = @robject.lookup(:genericSelf)[0]
-    @rnil = @robject.lookup('Nil')[0]
-    @rboolean = @robject.lookup('Boolean')[0]
-    @rstring = @robject.lookup('String')[0]
-    @rsymbol = @robject.lookup('Symbol')[0]
-    @rinteger = @robject.lookup('Integer')[0]
-    @rarray = @robject.lookup('Array')[0]
-    @rtuple = @robject.lookup('Tuple')[0]
-    @rhash = @robject.lookup('Hash')[0]
-    @rrange = @robject.lookup('Range')[0]
+    @rnil = @robject.lookup('Nil')[0].metaclass_for
+    @rboolean = @robject.lookup('Boolean')[0].metaclass_for
+    @rstring = @robject.lookup('String')[0].metaclass_for
+    @rsymbol = @robject.lookup('Symbol')[0].metaclass_for
+    @rinteger = @robject.lookup('Integer')[0].metaclass_for
+    @rarray = @robject.lookup('Array')[0].metaclass_for
+    @rtuple = @robject.lookup('Tuple')[0].metaclass_for
+    @rhash = @robject.lookup('Hash')[0].metaclass_for
+    @rrange = @robject.lookup('Range')[0].metaclass_for
     @rundefined = Rundefined.new
 
     define_builtins
@@ -330,8 +330,8 @@ class Context
         if thing.type_unknown?
           @errors << [thing.node, :fn_inference_fail, thing.name]
         end
-      elsif thing.kind_of?(Rclass)
-        check_function_type_inference_succeeded(thing)
+      elsif thing.kind_of?(Rmetaclass)
+        check_function_type_inference_succeeded(thing.metaclass_for)
       end
     }
     if scope.is_a?(Rclass)
@@ -381,7 +381,7 @@ class Context
         @errors << [node, :gvar_unknown, node.children[0].to_s]
         @rundefined
       else
-        gvar.type
+        gvar
       end
     when :ivar
       ivar = scope_top.lookup(node.children[0].to_s)[0]
@@ -397,7 +397,7 @@ class Context
         @errors << [node, :lvar_unknown, node.children[0].to_s]
         @rundefined
       else
-        lvar.type
+        lvar
       end
     when :and
       n_logic_op(node)
@@ -554,7 +554,7 @@ class Context
       raise 'expected lvasgn in resbody' unless node.children[1].type == :lvasgn
       name = node.children[1].children[0].to_s
       type = if _exceptions.length == 0
-               @robject.lookup('StandardError')[0]
+               @robject.lookup('StandardError')[0]&.metaclass_for
              else
                sum_of_types(_exceptions)
              end
@@ -563,9 +563,9 @@ class Context
       if type.is_a?(Rundefined)
         # error already reported. do nothing
       elsif rbinding == nil
-        scope_top.define_lvar(Rlvar.new(name, type))
-      elsif rbinding.type != type
-        @errors << [node, :var_type, name, rbinding.type.name, type.name]
+        scope_top.define_lvar(name, type)
+      elsif rbinding != type
+        @errors << [node, :var_type, name, rbinding.name, type.name]
       end
     end
     n_expr(node.children[2])
@@ -664,7 +664,7 @@ class Context
       if !block.definition_only
         function_scope = FnScope.new(node, scope_top, block.body_node, scope_top.in_class, block.fn_scope, nil)
         # define lvars from arguments
-        block.sig.args.each { |a| function_scope.define_lvar(Rlvar.new(a[0], a[1])) }
+        block.sig.args.each { |a| function_scope.define_lvar(a[0], a[1]) }
 
         # find block return type by evaluating body with concrete argument types in scope
         push_scope(function_scope)
@@ -732,14 +732,14 @@ class Context
   def n_class(node)
     class_name = node.children[0].children[1].to_s
     parent_class_name = node.children[1]&.children&.last&.to_s
-    parent_class = parent_class_name == nil ? @robject : scope_top.lookup(parent_class_name)[0]
+    parent_class = parent_class_name == nil ? @robject : scope_top.lookup(parent_class_name)[0]&.metaclass_for
 
     new_class = Rclass.new(
       class_name,
       parent_class
     )
 
-    scope_top.in_class.define(new_class)
+    scope_top.in_class.define(new_class.metaclass)
 
     push_scope(FnScope.new(node, nil, nil, new_class, nil, nil, is_constructor: false))
     r = n_expr(node.children[2])
@@ -761,7 +761,7 @@ class Context
       @errors << [node, :type_unknown, type_identifier]
       @rundefined
     else
-      type
+      type.metaclass_for
     end
   end
 
@@ -802,9 +802,9 @@ class Context
     if type.is_a?(Rundefined)
       # error already reported. do nothing
     elsif rbinding == nil
-      scope_top.define_lvar(Rlvar.new(name, type))
-    elsif !rbinding.type.supertype_of?(type)
-      @errors << [node, :var_type, name, rbinding.type.name, type.name]
+      scope_top.define_lvar(name, type)
+    elsif !rbinding.supertype_of?(type)
+      @errors << [node, :var_type, name, rbinding.name, type.name]
     end
 
     type
@@ -837,10 +837,8 @@ class Context
       return @rundefined
     end
     c = scope.lookup(node.children[1].to_s)[0]
-    if c&.is_a?(Rclass)
-      c.metaclass
-    elsif c != nil
-      c.type ? c.type : c
+    if c != nil
+      c
     else
       @errors << [node, :const_unknown, node.children[1].to_s, scope.name]
       @rundefined
@@ -932,7 +930,7 @@ class Context
       # define lvars from arguments
       fn.sig.args.each { |a|
         function_scope.define_lvar(
-          Rlvar.new(a[0], template_types[a[1]] || a[1])
+          a[0], template_types[a[1]] || a[1]
         )
       }
 

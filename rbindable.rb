@@ -199,7 +199,13 @@ class Rclass < Rbindable
   end
 
   def define(rbindable, bind_to: nil)
-    @namespace[bind_to || rbindable.name] = rbindable
+    if rbindable.is_a?(Rmetaclass)
+      @namespace[bind_to || rbindable.metaclass_for.name] = rbindable
+      rbindable.metaclass_for
+    else
+      @namespace[bind_to || rbindable.name] = rbindable
+      rbindable
+    end
   end
 
   # permits under-specialization. this is needed for tuples, which have

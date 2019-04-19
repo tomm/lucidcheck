@@ -79,7 +79,7 @@ class AnnotationParser
   end
 
   def lookup(name)
-    type = @lookup.(name)[0]
+    type = @lookup.(name)[0]&.metaclass_for
     if type.nil?
       raise AnnotationError, "Unknown type in annotation: '#{name}'"
     else

@@ -2,8 +2,8 @@
 class Scope
   def lookup_super; raise NotImplementedError end
   def lookup; raise NotImplementedError end
-  def define_lvar(rbindable); raise NotImplementedError end
-  def define_ivar(rbindable); raise NotImplementedError end
+  def define_lvar(name, rbindable); raise NotImplementedError end
+  def define_ivar(name, rbindable); raise NotImplementedError end
   def is_identical_fn_call_in_stack?(node, block); raise NotImplementedError end
 end
 
@@ -19,9 +19,9 @@ class WeakScope < Scope
     if r[0] == nil then @parent.lookup(name) else r end
   end
 
-  def define_lvar(rbindable)
-    if @parent.lookup(rbindable)[0] == nil
-      @local_scope[rbindable.name] = rbindable
+  def define_lvar(name, rbindable)
+    if @parent.lookup(name)[0] == nil
+      @local_scope[name] = rbindable
     else
       raise CheckerBug, "tried to define shadowing variable on WeakScope"
     end
@@ -79,8 +79,8 @@ class FnScope < Scope
     r
   end
 
-  def define_lvar(rbindable)
-    @local_scope[rbindable.name] = rbindable
+  def define_lvar(name, rbindable)
+    @local_scope[name] = rbindable
   end
 
   def define_ivar(name, rbindable)
