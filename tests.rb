@@ -1037,4 +1037,36 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
   end
+
+  def test_masgn
+    assert_equal(
+      [[4, :masgn_rhs_type, 'Nil'],
+       [5, :masgn_rhs_type, 'Array<Integer>'],
+       [6, :masgn_length_mismatch, 2, 3],
+       [8, :var_type, 'b', 'Integer', 'Float'],
+       [9, :var_type, 'b', 'Integer', 'String'],
+       [9, :var_type, 'a', 'String', 'Integer'],
+       [11, :var_type, '@d', 'Integer', 'Symbol']],
+      parse_str(
+        <<-RUBY
+          class A
+            def initialize()
+              x = ["hi", 2]
+              a, b = nil  # fails
+              a, b = [1,2]  # fails
+              a, b, c = x  # fails
+              a, b = x
+              b = 4.0  # fails
+              b, a = x  # fails
+              c, @d = x
+              @d = :a  # fails
+              y = (a, b = x)
+              a, b = y
+            end
+          end
+          A.new
+        RUBY
+      )
+    )
+  end
 end

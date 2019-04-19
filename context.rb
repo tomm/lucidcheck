@@ -354,15 +354,15 @@ class Context
   end
   
   def n_masgn(node)
-    p node
     lhs_node = node.children[0]
     rhs = n_expr(node.children[1])
-    p rhs.name
     raise "expected mlhs" if lhs_node.type != :mlhs
     if !rhs.is_specialization_of?(@rtuple)
       @errors << [node, :masgn_rhs_type, rhs.name]
+      @rundefined
     elsif lhs_node.children.length != rhs.specialization.length
       @errors << [node, :masgn_length_mismatch, rhs.specialization.length, lhs_node.children.length]
+      @rundefined
     else
       for index in 0...(rhs.specialization.length) do
         name = lhs_node.children[index].children[0].to_s
@@ -377,6 +377,7 @@ class Context
           @errors << [node, :checker_bug, "Unexpected in masgn: #{assign_type}"]
         end
       end
+      rhs
     end
   end
 
