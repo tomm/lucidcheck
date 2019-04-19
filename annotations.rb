@@ -112,7 +112,7 @@ class AnnotationParser
         return_type = lookup('Nil')
       end
 
-      Rfunc.new(nil, return_type, args, block_sig: block_sig)
+      Rfunc.new(nil, return_type, args, block_sig: block_sig, can_autocheck: true, checked: false)
     else
       type = lookup(eat)
       if has '<'

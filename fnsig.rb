@@ -9,6 +9,10 @@ class FnSig
     add_anon_args(anon_args)
   end
 
+  def no_args?
+    @args.empty? && @optargs.empty? && @kwargs.empty?
+  end
+
   #: fn(Array<Rbindable>)
   def add_anon_args(args)
     args.each { |a| @args << [nil, a] }

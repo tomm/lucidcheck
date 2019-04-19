@@ -1178,4 +1178,28 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
   end
+
+  def test_autocheck_annotated
+    assert_equal(
+      [[12, :fn_return_type, 'g', 'String', 'Float']],
+      parse_str(
+        <<-RUBY
+          class A
+            #: fn(Integer)
+            def initialize(x)
+              @x = 2
+            end
+            #: fn(Integer, &(Integer) -> String) -> String
+            def f(a)
+              yield(a + @x)
+            end
+            #: fn(Integer, &(Integer) -> Float) -> String
+            def g(a)
+              yield(a + @x)
+            end
+          end
+        RUBY
+      )
+    )
+  end
 end

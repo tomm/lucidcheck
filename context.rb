@@ -147,7 +147,7 @@ class Context
   #: fn(Parser::AST::Node, String)
   def define_attr_reader(node, scope, name)
     # don't know what ivars are declared yet, so generate 'code'
-    fn = Rfunc.new(name, nil, [])
+    fn = Rfunc.new(name, nil, [], checked: false)
     fn.node = node
     fn.body = Parser::AST::Node.new(
       :ivar,
@@ -167,7 +167,7 @@ class Context
   #: fn(Parser::AST::Node, String)
   def define_attr_writer(node, scope, name)
     # don't know what ivars are declared yet, so generate 'code'
-    fn = Rfunc.new(name + "=", nil)
+    fn = Rfunc.new(name + "=", nil, checked: false)
     fn.add_named_args([['v', nil]])
     fn.node = node
     fn.body = Parser::AST::Node.new(
@@ -275,13 +275,15 @@ class Context
   end
 
   class Rblock
-    attr_reader :sig, :body_node, :fn_scope
+    attr_reader :body_node, :fn_scope, :definition_only
+    attr_accessor :sig
     # fn(Array[String], node)
-    def initialize(arg_names, body_node, fn_scope)
+    def initialize(arg_names, body_node, fn_scope, definition_only: false)
       @sig = FnSig.new(nil, [])
       @sig.add_named_args(arg_names.map { |name| [name, nil] })
       @fn_scope = fn_scope
       @body_node = body_node
+      @definition_only = definition_only
     end
   end
 
@@ -309,14 +311,29 @@ class Context
   end
 
   def check_function_type_inference_succeeded(scope)
-    scope.namespace.each_value { |thing|
+    process = ->(scope, thing) {
       if thing.kind_of?(Rfunc)
+        # never checked this function. if there is a type annotation
+        # then we can check based on that
+        if thing.checked == false && thing.can_autocheck
+          call_by_definition_types(thing.node, scope, thing)
+        end
+
         if thing.type_unknown?
           @errors << [thing.node, :fn_inference_fail, thing.name]
         end
       elsif thing.kind_of?(Rclass)
         check_function_type_inference_succeeded(thing)
       end
+    }
+    if scope.is_a?(Rclass)
+      constructor = scope.metaclass.lookup('new')[0]
+      if constructor != nil
+        process.(scope.metaclass, constructor)
+      end
+    end
+    scope.namespace.each_value { |bindable|
+      process.(scope, bindable)
     }
   end
 
@@ -636,14 +653,16 @@ class Context
         return @rundefined
       end
 
-      function_scope = FnScope.new(node, scope_top, block.body_node, scope_top.in_class, block.fn_scope, nil)
-      # define lvars from arguments
-      block.sig.args.each { |a| function_scope.define_lvar(Rlvar.new(a[0], a[1])) }
+      if !block.definition_only
+        function_scope = FnScope.new(node, scope_top, block.body_node, scope_top.in_class, block.fn_scope, nil)
+        # define lvars from arguments
+        block.sig.args.each { |a| function_scope.define_lvar(Rlvar.new(a[0], a[1])) }
 
-      # find block return type by evaluating body with concrete argument types in scope
-      push_scope(function_scope)
-      block.sig.return_type = n_expr(block.body_node)
-      pop_scope()
+        # find block return type by evaluating body with concrete argument types in scope
+        push_scope(function_scope)
+        block.sig.return_type = n_expr(block.body_node)
+        pop_scope()
+      end
 
       block.sig.return_type
     end
@@ -719,7 +738,7 @@ class Context
 
     # define a 'new' static method if 'initialize' was not defined
     if scope_top.in_class.metaclass.lookup('new')[0] == nil
-      scope_top.in_class.metaclass.define(Rfunc.new('new', new_class))
+      scope_top.in_class.metaclass.define(Rfunc.new('new', new_class, checked: false))
     end
 
     pop_scope()
@@ -934,6 +953,8 @@ class Context
           fn.block_sig = block.sig
         end
       end
+
+      fn.checked = true
     else
       # purely 'header' function def. (has type stub but no code).
       # resolve template types
@@ -1009,22 +1030,7 @@ class Context
     [arg_name_type, optarg_name_type, kwarg_name_type]
   end
 
-  def define_constructor(node, args_node, fn_body, on_class)
-    if get_annotation_for_node(node)
-      @errors << [node, :annotation_error, "Annotations not (yet) supported on constructors"]
-    end
-    arg_name_type, optarg_name_type, kwarg_name_type = parse_function_args_def(args_node)
-    # assume return type for 'new' method
-    fn = Rfunc.new('new', on_class, is_constructor: true)
-    fn.add_named_args(arg_name_type)
-    fn.add_kw_args(kwarg_name_type)
-    fn.add_opt_args(optarg_name_type)
-    fn.node = node
-    fn.body = fn_body
-    on_class.metaclass.define(fn)
-  end
-
-  def define_normal_method(node, name, args_node, fn_body, on_class)
+  def define_method(node, name, args_node, fn_body, on_class)
     arg_name_type, optarg_name_type, kwarg_name_type = parse_function_args_def(args_node)
     annot_type = get_annotation_for_node(node)
 
@@ -1039,7 +1045,7 @@ class Context
       end
     else
       # don't know types of arguments or return type yet
-      fn = Rfunc.new(name, nil)
+      fn = Rfunc.new(name, nil, checked: false)
       fn.add_named_args(arg_name_type)
       fn.add_kw_args(kwarg_name_type)
       fn.add_opt_args(optarg_name_type)
@@ -1048,16 +1054,24 @@ class Context
     fn.body = fn_body
     # can assume return type of nil if body is empty
     if fn.body == nil then fn.return_type = @rnil end
-    on_class.define(fn)
+    fn
   end
 
   def n_def(node)
     name = node.children[0].to_s
 
     if name == 'initialize'
-      define_constructor(node, node.children[1], node.children[2], scope_top.in_class)
+      fn = define_method(node, 'new', node.children[1], node.children[2], scope_top.in_class)
+      fn.is_constructor = true
+      if fn.sig.no_args?
+        fn.can_autocheck = true
+      end
+      # note that return type of possible annotation is ignored
+      fn.return_type = scope_top.in_class
+      scope_top.in_class.metaclass.define(fn)
     else
-      define_normal_method(node, name, node.children[1], node.children[2], scope_top.in_class)
+      fn = define_method(node, name, node.children[1], node.children[2], scope_top.in_class)
+      scope_top.in_class.define(fn)
     end
   end
 
@@ -1067,6 +1081,20 @@ class Context
       raise "Checker bug. Expected self at #{node}"
     end
     name = node.children[1].to_s
-    define_normal_method(node, name, node.children[2], node.children[3], scope_top.in_class.metaclass)
+    fn = define_method(node, name, node.children[2], node.children[3], scope_top.in_class.metaclass)
+    scope_top.in_class.metaclass.define(fn)
+  end
+
+  # type check based on annotated types, rather than types passed in code
+  def call_by_definition_types(node, rclass, fn)
+    type_scope = rclass
+    call_scope = rclass
+    fn_scope = [FnScope.new(nil, nil, nil, @robject, nil, nil)]
+    arg_types = fn.sig.args.map { |a| a[1] }
+    block = Rblock.new([], nil, fn_scope, definition_only: true)
+    block.sig = fn.block_sig
+
+    function_call(type_scope, call_scope, fn, fn.body, arg_types, block)
+    #function_call(type_scope, call_scope, fn, node, arg_types, block)
   end
 end

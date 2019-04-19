@@ -98,16 +98,17 @@ class Rconst < Rbindable
 end
 
 class Rfunc < Rbindable
-  attr_accessor :node, :body, :sig, :block_sig
-  attr_reader :is_constructor
+  attr_accessor :node, :body, :sig, :block_sig, :checked, :can_autocheck, :is_constructor
 
   #: fn(String, Rbindable, Array<Rbindable>)
-  def initialize(name, return_type, anon_args = [], is_constructor: false, block_sig: nil)
+  def initialize(name, return_type, anon_args = [], is_constructor: false, block_sig: nil, checked: true, can_autocheck: false)
     super(name, nil)
     @sig = FnSig.new(return_type, anon_args)
     @block_sig = block_sig
     @node = nil
     @is_constructor = is_constructor
+    @checked = checked
+    @can_autocheck = can_autocheck
   end
 
   def type_unknown?
@@ -151,6 +152,7 @@ class Rmetaclass < Rbindable
     [@namespace[method_name], self]
   end
 
+  #: fn(Rbindable)
   def define(rbindable)
     @namespace[rbindable.name] = rbindable
   end
@@ -244,9 +246,12 @@ class Rconcreteclass < Rbindable
   def lookup(method_name)
     @class.lookup(method_name)
   end
+
+  #: fn(Rbindable)
   def define(rbindable)
     @class.define(rbindable)
   end
+
   # returns errors
   def specialize(template_param, concrete_type)
     t = @specialization[template_param]
