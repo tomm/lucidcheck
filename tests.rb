@@ -501,14 +501,13 @@ class TestLucidCheck < Test::Unit::TestCase
 
   def test_generic_non_id
     assert_equal(
-      [[4, :fn_arg_type, '==', 'Array<generic>', 'Array<generic>'],
-       [7, :fn_arg_type, '==', 'Array<generic>', 'Array<Integer>']],
+      [[7, :fn_arg_type, '==', 'Array<generic>', 'Array<Integer>']],
       parse_str(
         <<-RUBY
           a = Array.new
           b = Array.new
           a == a
-          a == b  # fail
+          a == b
           
           b.push(1)
           a == b  # fail

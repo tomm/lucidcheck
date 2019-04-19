@@ -81,6 +81,10 @@ class TemplateType < Rbindable
   def lookup(name)
     [nil, nil]
   end
+
+  def supertype_of?(other)
+    self.equal?(other)
+  end
 end
 
 class SelfType < Rbindable
@@ -235,16 +239,6 @@ class Rconcreteclass < Rbindable
   def define(rbindable)
     @class.define(rbindable)
   end
-  def eql?(other)
-    if is_fully_specialized?
-      @class == other.class && @specialization == other.specialization
-    else
-      self.equal?(other)
-    end
-  end
-  def ==(other)
-    self.eql?(other)
-  end
   # returns errors
   def specialize(template_param, concrete_type)
     t = @specialization[template_param]
@@ -309,14 +303,6 @@ class Rsumtype < Rbindable
 
   def to_non_optional
     sum_of_types(@options.reject { |o| o.name == 'Nil' })
-  end
-
-  def ==(other)
-    if other.is_a?(Rsumtype)
-      other.options.map { |o| @options.include?(o) }.all?
-    else
-      @options.map { |o| o == other }.any?
-    end
   end
 end
 

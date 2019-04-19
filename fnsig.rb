@@ -44,11 +44,6 @@ class FnSig
   ##: fn(Array[Rbindable]) > Array[error]
   def call_typecheck?(node, fn_name, passed_args, mut_template_types, block, self_type)
 
-    if passed_args.map { |a| a == nil }.any?
-      raise "Passed nil arg to method #{fn_name}. weird. args: #{passed_args}"
-      #return [[node, :fn_inference_fail, fn_name]]
-    end
-
     if passed_args.length != @args.length
       return [[node, :fn_arg_num, fn_name, @args.length, passed_args.length]]
     end
@@ -79,7 +74,7 @@ class FnSig
         end
       else
         # normal arg
-        if (def_type.is_a?(SelfType) && passed == self_type) ||
+        if (def_type.is_a?(SelfType) && self_type.supertype_of?(passed)) ||
             (!def_type.is_a?(SelfType) && def_type.supertype_of?(passed))
           # type check passed
         else
