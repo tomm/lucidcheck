@@ -226,18 +226,19 @@ class Rclass < Rbindable
 end
 
 class Rconcreteclass < Rbindable
-  attr_reader :class, :specialization
-  def initialize(_class, specialization)
+  attr_reader :template_class, :specialization
+  #: fn(Rclass, Hash<TemplateType, Rbindable>)
+  def initialize(_template_class, specialization)
     @specialization = specialization
-    @class = _class
+    @template_class = _template_class
   end
 
   def new_inst
-    Rconcreteclass.new(@class, @specialization.clone)
+    Rconcreteclass.new(@template_class, @specialization.clone)
   end
 
   def name
-    "#{@class.name}<#{@specialization.map {|v|v[1].name}.join(',')}>"
+    "#{@template_class.name}<#{@specialization.map {|v|v[1].name}.join(',')}>"
   end
 
   def add_template_params_scope(mut_template_types)
@@ -248,15 +249,15 @@ class Rconcreteclass < Rbindable
     !@specialization.map {|kv| kv[1].is_a?(TemplateType)}.any?
   end
   def type
-    @class.type
+    @template_class.type
   end
   def lookup(method_name)
-    @class.lookup(method_name)
+    @template_class.lookup(method_name)
   end
 
   #: fn(Rbindable)
   def define(rbindable)
-    @class.define(rbindable)
+    @template_class.define(rbindable)
   end
 
   # returns errors
@@ -276,7 +277,7 @@ class Rconcreteclass < Rbindable
     }
   end
   def supertype_of?(other)
-    if self.class == other.class
+    if other.is_a?(Rconcreteclass) && other.template_class.equal?(template_class)
       if @specialization.keys == other.specialization.keys
         @specialization.keys.map { |k|
           @specialization[k].supertype_of?(other.specialization[k])
@@ -290,7 +291,7 @@ class Rconcreteclass < Rbindable
   end
 
   def is_specialization_of?(abstract_class)
-    self.class.equal?(abstract_class)
+    @template_class.equal?(abstract_class)
   end
 end
 

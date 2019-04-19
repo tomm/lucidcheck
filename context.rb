@@ -238,7 +238,7 @@ class Context
 
     @rtuple.define(Rbuiltin.new('[]', BuiltinSig.new([@rinteger]), ->(node, rself, args) {
       index = args[0].children[0]
-      type = rself.specialization[ rself.class.template_params[index] ]
+      type = rself.specialization[ rself.template_class.template_params[index] ]
       if type == nil
         @errors << [args[0], :tuple_index, rself.name]
         @rundefined
@@ -254,7 +254,7 @@ class Context
         @errors << [args[0], :tuple_index, rself.name]
         @rundefined
       else
-        type = rself.specialization[ rself.class.template_params[index] ]
+        type = rself.specialization[ rself.template_class.template_params[index] ]
         if type == nil
           @errors << [args[0], :tuple_index, rself.name]
           @rundefined
@@ -486,7 +486,7 @@ class Context
     else
       for index in 0...(rhs.specialization.length) do
         name = lhs_node.children[index].children[0].to_s
-        type = rhs.specialization[ rhs.class.template_params[index] ]
+        type = rhs.specialization[ rhs.template_class.template_params[index] ]
         assign_type = lhs_node.children[index].type
         case assign_type
         when :lvasgn
