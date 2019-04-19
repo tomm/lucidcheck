@@ -259,7 +259,7 @@ class Context
           @errors << [args[0], :tuple_index, rself.name]
           @rundefined
         elsif !type.supertype_of?(val)
-          @errors << [args[1], :fn_arg_type, '[]=', "Integer,#{type}", "Integer,#{val}"]
+          @errors << [args[1], :fn_arg_type, '[]=', "Integer,#{type.name}", "Integer,#{val.name}"]
           @rundefined
         else
           type
@@ -516,7 +516,7 @@ class Context
       .map { |n|
         _case_type = n_expr(n.children[0])
         if _case_type != needle
-          @errors << [n.children[0], :match_type, needle.to_s, _case_type.to_s]
+          @errors << [n.children[0], :match_type, needle.name, _case_type.name]
         end
         n_expr(n.children[1])
       }

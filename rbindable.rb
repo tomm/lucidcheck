@@ -1,17 +1,8 @@
 # Something you can assign to a variable
 class Rbindable
   attr_accessor :name
-  attr_reader :type
-  def initialize(name, type)
+  def initialize(name)
     @name = name
-    @type = type
-    if type && !type.kind_of?(Rbindable)
-      raise "Weird type passed to Rbindable.initialize: #{type} (#{type.class})"
-    end
-  end
-
-  def to_s
-    @name
   end
 
   def new_inst
@@ -37,7 +28,7 @@ end
 class Rbuiltin < Rbindable
   attr_reader :sig
   def initialize(name, sig, fn)
-    super(name, nil)
+    super(name)
     @fn = fn
     # only actually need the args bit of sig. return type determined by what call() returns
     @sig = sig
@@ -51,19 +42,19 @@ end
 # when type inference fails
 class Rundefined < Rbindable
   def initialize
-    super(:undefined, nil)
+    super(:undefined)
   end
 end
 
 class Rretvoid < Rbindable
   def initialize
-    super(:retvoid, nil)
+    super(:retvoid)
   end
 end
 
 class Rrecursion < Rbindable
   def initialize
-    super(:unannotated_recursive_function, nil)
+    super(:unannotated_recursive_function)
   end
 
   def lookup(name)
@@ -73,7 +64,7 @@ end
 
 class TemplateType < Rbindable
   def initialize
-    super(:generic, nil)
+    super(:generic)
   end
 
   def lookup(name)
@@ -87,7 +78,7 @@ end
 
 class SelfType < Rbindable
   def initialize
-    super(:genericSelf, nil)
+    super(:genericSelf)
   end
 end
 
@@ -96,7 +87,7 @@ class Rfunc < Rbindable
 
   #: fn(String, Rbindable, Array<Rbindable>)
   def initialize(name, return_type, anon_args = [], is_constructor: false, block_sig: nil, checked: true, can_autocheck: false)
-    super(name, nil)
+    super(name)
     @sig = FnSig.new(return_type, anon_args)
     @block_sig = block_sig
     @node = nil
@@ -136,7 +127,7 @@ end
 
 class Rmodule < Rbindable
   def initialize(name)
-    super(name, nil)
+    super(name)
     @namespace = {}
   end
 
@@ -153,7 +144,7 @@ end
 class Rmetaclass < Rbindable
   attr_reader :metaclass_for
   def initialize(parent_name, metaclass_for)
-    super("#{parent_name}:Class", nil)
+    super("#{parent_name}:Class")
     @namespace = {}
     @metaclass_for = metaclass_for
   end
@@ -172,7 +163,7 @@ class Rclass < Rbindable
   attr_reader :metaclass, :namespace, :parent, :template_params
   def initialize(name, parent_class, template_params: [])
     @metaclass = Rmetaclass.new(name, self)
-    super(name, nil)
+    super(name)
     @parent = parent_class
     @namespace = {}
     @template_params = template_params
@@ -307,7 +298,7 @@ class Rsumtype < Rbindable
   attr_reader :options
   #: fn(Array<Rbindable>)
   def initialize(types)
-    super(nil, nil)
+    super(nil)
     @options = types.sort_by { |a| a.name.to_s }
     # base_type is most recent common parent type of all in 'types'
     # XXX should compute rather than pass in
