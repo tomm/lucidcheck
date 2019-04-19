@@ -74,13 +74,13 @@ class FnSig
             end
           end
           mut_template_types[def_type] = passed
-        elsif t != passed
+        elsif !t.supertype_of?(passed)
           return [function_call_type_error(node, fn_name, passed_args, mut_template_types)]
         end
       else
         # normal arg
         if (def_type.is_a?(SelfType) && passed == self_type) ||
-           (!def_type.is_a?(SelfType) && passed == def_type)
+            (!def_type.is_a?(SelfType) && def_type.supertype_of?(passed))
           # type check passed
         else
           return [function_call_type_error(node, fn_name, passed_args, mut_template_types)]

@@ -993,4 +993,49 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
   end
+
+  def test_var_supertyping
+    assert_equal(
+      [[7, :var_type, 'a', 'A', 'C'],
+       [10, :var_type, 'b', 'B', 'A']],
+      parse_str(
+        <<-RUBY
+          class A; end
+          class B < A; end
+          class C; end
+
+          a = A.new
+          a = B.new
+          a = C.new  # fails
+
+          b = B.new
+          b = A.new  # fails
+        RUBY
+      )
+    )
+  end
+
+  def test_tuple_supertyping
+    assert_equal(
+      [[9, :fn_arg_type, '[]=', 'Integer,A', 'Integer,C'],
+       [13, :var_type, 'x', 'Tuple<A,Integer>', 'Tuple<C,Integer>']],
+      parse_str(
+        <<-RUBY
+          class A; end
+          class B < A; end
+          class C; end
+
+          x = [A.new, 2]
+
+          x[0] = A.new
+          x[0] = B.new
+          x[0] = C.new  # fails
+
+          x = [A.new, 4]
+          x = [B.new, 4]
+          x = [C.new, 4]  # fails
+        RUBY
+      )
+    )
+  end
 end

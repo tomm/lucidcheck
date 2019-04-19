@@ -123,7 +123,7 @@ class Context
         if type == nil
           @errors << [args[0], :tuple_index, rself.name]
           @rundefined
-        elsif type != val
+        elsif !type.supertype_of?(val)
           @errors << [args[1], :fn_arg_type, '[]=', "Integer,#{type}", "Integer,#{val}"]
           @rundefined
         else
@@ -622,7 +622,7 @@ class Context
       else
         scope_top.define_ivar(Rlvar.new(name, type))
       end
-    elsif scope_top.lookup(name)[0].type != type
+    elsif !scope_top.lookup(name)[0].type.supertype_of?(type)
       @errors << [node, :var_type, name, scope_top.lookup(name)[0].type.name, type.name]
     else
       # binding already existed. types match. cool
@@ -641,7 +641,7 @@ class Context
       # error already reported. do nothing
     elsif rbinding == nil
       scope_top.define_lvar(Rlvar.new(name, type))
-    elsif rbinding.type != type
+    elsif !rbinding.type.supertype_of?(type)
       @errors << [node, :var_type, name, rbinding.type.name, type.name]
     end
 

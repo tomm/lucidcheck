@@ -18,7 +18,7 @@ class Rbindable
     self
   end
 
-  def rinstance_of?(other)
+  def supertype_of?(other)
     false
   end
 
@@ -158,11 +158,13 @@ class Rclass < Rbindable
     @template_params.length
   end
 
-  def rinstance_of?(other)
-    if other.instance_of?(Rclass)
-      p = @parent
-      while p != nil && p != other do; p = p.parent end
-      p == other
+  def supertype_of?(other)
+    if self === other
+      true
+    elsif other.instance_of?(Rclass)
+      p = other.parent
+      while p != nil && p != self do; p = p.parent end
+      p == self
     else
       false
     end
@@ -259,6 +261,19 @@ class Rconcreteclass < Rbindable
       @specialization[k] = concrete_type if v == template_param
     }
   end
+  def supertype_of?(other)
+    if self.class == other.class
+      if @specialization.keys == other.specialization.keys
+        @specialization.keys.map { |k|
+          @specialization[k].supertype_of?(other.specialization[k])
+        }.all?
+      else
+        false
+      end
+    else
+      false
+    end
+  end
 end
 
 class Rsumtype < Rbindable
@@ -270,6 +285,14 @@ class Rsumtype < Rbindable
     # base_type is most recent common parent type of all in 'types'
     # XXX should compute rather than pass in
     @base_type = most_recent_common_ancestor(types)
+  end
+
+  def supertype_of?(other)
+    if other.is_a?(Rsumtype)
+      other.options.map { |o| @options.find { |s| s.supertype_of?(o) } }.all?
+    else
+      @options.find { |o| o.supertype_of?(other) } != nil
+    end
   end
 
   def lookup(name)
@@ -299,7 +322,7 @@ end
 
 def most_recent_common_ancestor(types)
   a = types.first
-  while a != nil && !types.map { |t| t.rinstance_of?(a) }.all? do
+  while a != nil && !types.map { |t| a.supertype_of?(t) }.all? do
     a = a.parent
   end
   a
