@@ -1202,4 +1202,26 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
   end
+
+  def test_modules
+    assert_equal(
+      [[12, :fn_arg_type, 'hello', 'Integer', 'Symbol']],
+      parse_str(
+        <<-RUBY
+          module A
+            class B
+              def hello(x)
+                puts x.to_s
+              end
+            end
+
+            C = 123
+          end
+          b = A::B.new
+          b.hello(A::C)
+          b.hello(:hi)
+        RUBY
+      )
+    )
+  end
 end

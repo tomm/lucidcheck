@@ -91,12 +91,6 @@ class SelfType < Rbindable
   end
 end
 
-class Rlvar < Rbindable
-end
-
-class Rconst < Rbindable
-end
-
 class Rfunc < Rbindable
   attr_accessor :node, :body, :sig, :block_sig, :checked, :can_autocheck, :is_constructor
 
@@ -137,6 +131,22 @@ class Rfunc < Rbindable
 
   def return_type
     @sig.return_type
+  end
+end
+
+class Rmodule < Rbindable
+  def initialize(name)
+    super(name, nil)
+    @namespace = {}
+  end
+
+  def lookup(method_name)
+    [@namespace[method_name], self]
+  end
+
+  #: fn(Rbindable)
+  def define(rbindable, bind_to: nil)
+    @namespace[bind_to || rbindable.name] = rbindable
   end
 end
 

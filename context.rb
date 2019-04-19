@@ -418,7 +418,7 @@ class Context
     when :class
       n_class(node)
     when :module
-      # ignore for now :)
+      n_module(node)
     when :if
       n_if(node)
     when :while
@@ -729,6 +729,20 @@ class Context
     end
   end
 
+  def n_module(node)
+    module_name = node.children[0].children[1].to_s
+
+    new_module = Rmodule.new(module_name)
+
+    scope_top.in_class.define(new_module)
+
+    push_scope(FnScope.new(node, nil, nil, new_module, nil, nil, is_constructor: false))
+    r = n_expr(node.children[1])
+    pop_scope()
+
+    r
+  end
+
   def n_class(node)
     class_name = node.children[0].children[1].to_s
     parent_class_name = node.children[1]&.children&.last&.to_s
@@ -739,7 +753,7 @@ class Context
       parent_class
     )
 
-    scope_top.in_class.define(new_class.metaclass)
+    scope_top.in_class.define(new_class.metaclass, bind_to: class_name)
 
     push_scope(FnScope.new(node, nil, nil, new_class, nil, nil, is_constructor: false))
     r = n_expr(node.children[2])
@@ -827,20 +841,23 @@ class Context
 
   # const lookup
   def n_const(node)
+    name = node.children[1].to_s
     scope = n_expr(node.children[0])
     if scope == @rnil
       scope = scope_top.in_class
     elsif scope.is_a?(Rmetaclass)
       scope = scope.metaclass_for
+    elsif scope.is_a?(Rmodule)
+      # good
     else
       @errors << [node, :general_type_error, 'Class / Module', scope&.name]
       return @rundefined
     end
-    c = scope.lookup(node.children[1].to_s)[0]
+    c = scope.lookup(name)[0]
     if c != nil
       c
     else
-      @errors << [node, :const_unknown, node.children[1].to_s, scope.name]
+      @errors << [node, :const_unknown, name, scope.name]
       @rundefined
     end
   end
