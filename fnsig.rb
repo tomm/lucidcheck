@@ -1,10 +1,10 @@
 class FnSig
-  attr_accessor :args, :return_type
+  attr_accessor :args, :return_type, :kwargs
 
   def initialize(return_type, anon_args)
     @args = []
     @optargs = []
-    @kwargs = []
+    @kwargs = nil
     @return_type = return_type
     add_anon_args(anon_args)
   end
@@ -18,9 +18,9 @@ class FnSig
     args.each { |a| @args << [nil, a] }
   end
 
-  #: fn(Array<Tuple<String, Rbindable>>)
-  def add_kw_args(args)
-    @kwargs.concat(args)
+  #: fn(Kwtype)
+  def set_kwargs(kwargs)
+    @kwargs = kwargs
   end
 
   #: fn(Array<Tuple<String, Rbindable>>)
@@ -58,10 +58,15 @@ class FnSig
   end
 
   ##: fn(Array[Rbindable]) > Array[error]
-  def call_typecheck?(node, fn_name, passed_args, mut_template_types, block, self_type)
+  def call_typecheck?(node, fn_name, passed_args, kwargs, mut_template_types, block, self_type)
 
     if passed_args.length != @args.length
       return [[node, :fn_arg_num, fn_name, @args.length, passed_args.length]]
+    end
+
+    if kwargs != nil
+      kw_errors = kwargs.check_and_learn(node, kwargs)
+      return kw_errors if !kw_errors.empty?
     end
 
     # collect arg types if we know none

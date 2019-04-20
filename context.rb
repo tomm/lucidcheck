@@ -4,6 +4,7 @@ require_relative 'rbindable'
 require_relative 'fnsig'
 require_relative 'annotations'
 require_relative 'types_core'
+require_relative 'kwtype'
 
 class Context
   attr_reader :rself
@@ -82,6 +83,10 @@ class Context
         "Number of variables to assign does not match tuple length (found #{e[3]}, need #{e[2]})"
       when :general_type_error
         "Expected '#{e[2]}' but found '#{e[3]}'"
+      when :fn_kwargs_unexpected
+        "Unexpected keyword arguments: #{e[2].join(', ')}"
+      when :fn_kwarg_type
+        "Keyword argument '#{e[2]}' expected type '#{e[3]}' but found '#{e[4]}'"
       else
         e.to_s
       end
@@ -654,7 +659,7 @@ class Context
       @errors << [scope_top.caller_node || node, :no_block_given]
       @rundefined
     else
-      type_errors = block.sig.call_typecheck?(scope_top.caller_node || node, '<block>', passed_args, mut_template_types, nil, scope_top.in_class)
+      type_errors = block.sig.call_typecheck?(scope_top.caller_node || node, '<block>', passed_args, nil, mut_template_types, nil, scope_top.in_class)
 
       if !type_errors.empty?
         @errors.concat(type_errors)
@@ -685,12 +690,12 @@ class Context
   def n_super(node)
     args = node.children.map {|n| n_expr(n) }
     fn, call_scope = scope_top.lookup_super
-    function_call(scope_top.in_class, call_scope, fn, node, args, scope_top.passed_block)
+    function_call(scope_top.in_class, call_scope, fn, node, args, nil, scope_top.passed_block)
   end
 
   def n_zsuper(node)
     fn, call_scope = scope_top.lookup_super
-    function_call(scope_top.in_class, call_scope, fn, node, [], scope_top.passed_block)
+    function_call(scope_top.in_class, call_scope, fn, node, [], nil, scope_top.passed_block)
   end
 
   def n_hash_literal(node)
@@ -878,7 +883,14 @@ class Context
     type_scope = node.children[0] ? n_expr(node.children[0]) : scope_top.in_class
     name = node.children[1].to_s
     arg_nodes = node.children[2..-1]
-    arg_types = arg_nodes.map {|n| n_expr(n) }
+    arg_types = arg_nodes.select { |n| n.type != :hash }.map {|n| n_expr(n) }
+    kw_arg_node = arg_nodes.find { |n| n.type == :hash }
+    
+    kwargs = if kw_arg_node.nil?
+               nil
+             else
+               n_kwargs(kw_arg_node)
+             end
 
     return @rundefined if type_scope.kind_of?(Rundefined)
 
@@ -899,7 +911,7 @@ class Context
       @errors << [node, :fn_unknown, name, type_scope.name]
       @rundefined
     elsif fn.kind_of?(Rbuiltin)
-      errs = fn.sig.nil? ? [] : fn.sig.call_typecheck?(node, fn.name, arg_types, {}, nil, type_scope)
+      errs = fn.sig.nil? ? [] : fn.sig.call_typecheck?(node, fn.name, arg_types, nil, {}, nil, type_scope)
       if errs.empty?
         fn.call(node, type_scope, arg_nodes)
       else
@@ -907,7 +919,7 @@ class Context
         @rundefined
       end
     elsif fn.kind_of?(Rfunc)
-      ret = function_call(type_scope, call_scope, fn, node, arg_types, block)
+      ret = function_call(type_scope, call_scope, fn, node, arg_types, kwargs, block)
 
       if node.type == :csend
         sum_of_types([@rnil, ret])
@@ -924,7 +936,7 @@ class Context
   # type_scope = String
   # call_scope = Object (because to_f is on Object)
   # fn = RFunc of whatever Object.method(:to_f) is
-  def function_call(type_scope, call_scope, fn, node, args, block)
+  def function_call(type_scope, call_scope, fn, node, args, kwargs, block)
     if fn.is_constructor
       if !call_scope.is_a?(Rmetaclass)
         raise 'constructor not called with scope of metaclass'
@@ -933,7 +945,7 @@ class Context
     end
     template_types = { @rself => type_scope }
     type_scope.add_template_params_scope(template_types)
-    type_errors = fn.sig.call_typecheck?(node, fn.name, args, template_types, block, type_scope)
+    type_errors = fn.sig.call_typecheck?(node, fn.name, args, kwargs, template_types, block, type_scope)
 
     if !type_errors.empty?
       @errors.concat(type_errors)
@@ -944,12 +956,18 @@ class Context
     elsif fn.body != nil
       # function definition with function body code
       function_scope = FnScope.new(node, scope_top, fn.body, call_scope, nil, block, is_constructor: fn.is_constructor)
-      # define lvars from arguments
+      # define lvars from normal arguments
       fn.sig.args.each { |a|
         function_scope.define_lvar(
           a[0], template_types[a[1]] || a[1]
         )
       }
+      # define lvars from kwargs
+      if fn.sig.kwargs != nil
+        fn.sig.kwargs.map.each { |kv|
+          function_scope.define_lvar(kv[0], kv[1])
+        }
+      end
 
       if scope_top.is_identical_fn_call_in_stack?(fn.body, block)
         # never actually recurse! we want this bastible to finish
@@ -1072,7 +1090,7 @@ class Context
       # don't know types of arguments or return type yet
       fn = Rfunc.new(name, nil, checked: false)
       fn.add_named_args(arg_name_type)
-      fn.add_kw_args(kwarg_name_type)
+      fn.set_kwargs(Kwtype.new(kwarg_name_type.to_h))
       fn.add_opt_args(optarg_name_type)
     end
     fn.node = node
@@ -1118,8 +1136,18 @@ class Context
     arg_types = fn.sig.args.map { |a| a[1] }
     block = Rblock.new([], nil, fn_scope, definition_only: true)
     block.sig = fn.block_sig
+    kwargs = fn.sig.kwargs&.clone
 
-    function_call(type_scope, call_scope, fn, fn.body, arg_types, block)
-    #function_call(type_scope, call_scope, fn, node, arg_types, block)
+    function_call(type_scope, call_scope, fn, fn.body, arg_types, kwargs, block)
+  end
+
+  def n_kwargs(node)
+    raise "not kwargs" unless node.type == :hash
+
+    kwargs = node.children.map {|n| [n.children[0].children[0].to_s,
+                                       n_expr(n.children[1])] }.to_h
+
+    # not an Rbindable!
+    Kwtype.new(kwargs)
   end
 end

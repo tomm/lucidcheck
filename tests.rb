@@ -1224,4 +1224,39 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
   end
+
+  def test_kwargs
+    assert_equal(
+      [[5, :fn_unknown, 'd', 'Object'],
+       [7, :fn_arg_type, '==', 'Integer', 'Nil'],
+       [5, :fn_unknown, "d", "Object"],
+       [7, :fn_arg_type, "==", "Integer", "Nil"],
+       [11, :fn_kwarg_type, "b", "Integer", "Float"],
+       [5, :fn_unknown, "d", "Object"],
+       [7, :fn_arg_type, "==", "Integer", "Integer | Nil"],
+       [13, :fn_kwarg_type, "c", "Integer | Nil", "Float"],
+       [5, :fn_unknown, "d", "Object"],
+       [7, :fn_arg_type, "==", "Integer", "Integer | Nil"],
+       [15, :fn_kwargs_unexpected, "d"]],
+      parse_str(
+        <<-RUBY
+          def f(a, b: 2, c: nil)
+            a
+            b
+            c
+            d  # fails
+            a == b
+            a == c  # fails
+          end
+          f(1)
+          f(1, b: 3)
+          f(1, b: 3.0)  # fails
+          f(1, b: 3, c: 4)
+          f(1, b: 3, c: 4.0)  # fails
+          f(1, b: 3, c: nil)
+          f(1, b: 3, d: 0)  # fails
+        RUBY
+      )
+    )
+  end
 end

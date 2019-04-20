@@ -106,9 +106,9 @@ class Rfunc < Rbindable
     @sig.add_named_args(arg_name_type)
   end
 
-  #: fn(Array<Tuple<String, Rbindable>>)
-  def add_kw_args(arg_name_type)
-    @sig.add_kw_args(arg_name_type)
+  #: fn(Kwtype)
+  def set_kwargs(kwargs)
+    @sig.set_kwargs(kwargs)
   end
 
   #: fn(Array<Tuple<String, Rbindable>>)
@@ -276,6 +276,7 @@ class Rconcreteclass < Rbindable
       @specialization[k] = concrete_type if v == template_param
     }
   end
+
   def supertype_of?(other)
     if other.is_a?(Rconcreteclass) && other.template_class.equal?(template_class)
       if @specialization.keys == other.specialization.keys

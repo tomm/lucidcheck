@@ -44,6 +44,7 @@ def make_robject
   rhash.metaclass.define(Rfunc.new('new', rhash[[_K, _V]], []))
   rhash.define(Rfunc.new('[]=', _V, [_K, _V]))
   rhash.define(Rfunc.new('[]', _V, [_K]))
+  rhash.define(Rfunc.new('keys', rarray[[_K]], []))
 
   rarray.metaclass.define(Rfunc.new('new', rarray[[_T]], []))
   rarray.define(Rfunc.new('length', rinteger, []))
