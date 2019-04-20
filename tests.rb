@@ -613,13 +613,13 @@ class TestLucidCheck < Test::Unit::TestCase
 
   def test_logic_op
     assert_equal(
-      [[2, :expected_boolean, 'Integer'],
-       [3, :expected_boolean, 'Integer']],
+      [[2, :var_type, 'a', 'Boolean', 'Boolean | Integer'],
+       [3, :var_type, 'a', 'Boolean', 'String | Symbol']],
       parse_str(
         <<-RUBY
           a = true && true || false
           a = true || 1
-          a = 1 || !!1
+          a = :hi || "hi"
         RUBY
       )
     )

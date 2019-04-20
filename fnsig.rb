@@ -64,8 +64,8 @@ class FnSig
       return [[node, :fn_arg_num, fn_name, @args.length, passed_args.length]]
     end
 
-    if kwargs != nil
-      kw_errors = kwargs.check_and_learn(node, kwargs)
+    if @kwargs != nil && kwargs != nil
+      kw_errors = @kwargs.check_and_learn(node, kwargs)
       return kw_errors if !kw_errors.empty?
     end
 

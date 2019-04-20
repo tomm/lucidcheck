@@ -645,13 +645,9 @@ class Context
   def n_logic_op(node)
     left = n_expr(node.children[0])
     right = n_expr(node.children[1])
-    if left != @rboolean
-      @errors << [node.children[0], :expected_boolean, left.name]
-    end
-    if right != @rboolean
-      @errors << [node.children[1], :expected_boolean, right.name]
-    end
-    @rboolean
+
+    # no sensible checks, since this is a total shit-show operator
+    sum_of_types([left, right])
   end
 
   def block_call(node, block, passed_args, mut_template_types)
