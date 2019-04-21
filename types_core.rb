@@ -34,6 +34,7 @@ def make_robject
   robject.define(Rfunc.new('to_s', rstring, []))
   robject.define(Rfunc.new('to_f', rfloat, []))
   robject.define(Rfunc.new('to_i', rinteger, []))
+  robject.define(Rfunc.new('is_a?', rboolean, [robject.metaclass]))
 
   # XXX incomplete
   rfile.metaclass.define(Rfunc.new('open', rfile, [rstring]))
@@ -50,6 +51,7 @@ def make_robject
   rarray.define(Rfunc.new('length', rinteger, []))
   rarray.define(Rfunc.new('clear', rself, []))
   rarray.define(Rfunc.new('push', rself, [_T]))
+  rarray.define(Rfunc.new('*', rself, [rinteger]))
   rarray.define(Rfunc.new('[]', _T, [rinteger]))
   rarray.define(Rfunc.new('[]=', _T, [rinteger, _T]))
   rarray.define(Rfunc.new('include?', rboolean, [_T]))

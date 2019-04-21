@@ -19,7 +19,7 @@ class AnnotationParser
   def self.tokenize(str)
     tokens = []
     pos = 0
-    identifier_regex = /^[A-Za-z]+[!\?]?/
+    identifier_regex = /^[A-Za-z_][A-Za-z0-9_]*[!\?]?/
 
     while pos < str.length do
       c = str.slice(pos)
@@ -87,11 +87,24 @@ class AnnotationParser
     end
   end
 
+  def parse_kwargs
+    kwargs = {}
+    loop {
+      identifier = eat
+      expect! ':'
+      type = parse_type
+      kwargs[identifier] = type
+      break kwargs unless has ','
+      expect! ','
+    }
+  end
+
   def parse_single_type
     if has 'fn'
       eat
       has '('
       args = []
+      kwargs = {}
       block_sig = nil
       loop {
         eat
@@ -99,7 +112,11 @@ class AnnotationParser
           block_sig = parse_block_sig
           break
         elsif !has ')'
-          args.push(parse_type)
+          if has_ahead(1, ':')
+            kwargs = parse_kwargs
+          else
+            args.push(parse_type)
+          end
         end
 
         break unless has ','
@@ -112,7 +129,9 @@ class AnnotationParser
         return_type = lookup('Nil')
       end
 
-      Rfunc.new(nil, return_type, args, block_sig: block_sig, can_autocheck: true, checked: false)
+      fn = Rfunc.new(nil, return_type, args, block_sig: block_sig, can_autocheck: true, checked: false)
+      fn.set_kwargs(kwargs)
+      fn
     else
       type = lookup(eat)
       if has '<'
@@ -148,6 +167,10 @@ class AnnotationParser
 
   def has(val)
     @tokens.first == val
+  end
+
+  def has_ahead(index, val)
+    @tokens[index] == val
   end
 
   def expect!(val)

@@ -17,6 +17,7 @@ if __FILE__ == $0
 
     ctx = Context.new
     errors = ctx.check(filename, source)
+    errors.uniq!
     if !errors.empty?
       got_errors = true
       puts errors.map{|e| ctx.error_msg(e)}.join("\n")

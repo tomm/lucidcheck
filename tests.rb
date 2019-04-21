@@ -651,10 +651,11 @@ class TestLucidCheck < Test::Unit::TestCase
 
   def test_annotation_tokenizer
     assert_equal(
-      ["fn","<","T",",","U",">","(","Integer",",","T",")",
+      ["fn","<","T",",","U",">","(","Integer",",","T",",",
+       "some_kwarg0",":","Integer","|","String",")",
        "->","Array","<","U",">"
       ],
-      AnnotationParser.tokenize("fn<T,U>(Integer,T) -> Array<U>")
+      AnnotationParser.tokenize("fn<T,U>(Integer,T,some_kwarg0: Integer | String) -> Array<U>")
     )
   end
 
@@ -1255,6 +1256,36 @@ class TestLucidCheck < Test::Unit::TestCase
           f(1, b: 3, c: 4.0)  # fails
           f(1, b: 3, c: nil)
           f(1, b: 3, d: 0)  # fails
+        RUBY
+      )
+    )
+  end
+
+  def test_function_kwarg_annotations
+    assert_equal(
+      [[4, :fn_kwarg_type, 'y', 'Integer', 'Nil'],
+       [7, :fn_kwarg_type, 'z', 'Nil | String', 'Symbol']],
+      parse_str(
+        <<-RUBY
+          #: fn(Integer, y: Integer, z: Nil | String) -> Nil | String
+          def a(x, y: 4, z: nil); z end
+          a(3)
+          a(3, y: nil)
+          a(3, y: 5)
+          a(3, z: 'hi')
+          a(3, z: :hi)
+        RUBY
+      )
+    )
+  end
+
+  def test_is_a
+    assert_equal(
+      [[1, :fn_arg_type, 'is_a?', 'Object:Class', 'Integer']],
+      parse_str(
+        <<-RUBY
+          1.is_a?(2)
+          1.is_a?(Integer)
         RUBY
       )
     )

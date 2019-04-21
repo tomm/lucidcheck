@@ -1,6 +1,7 @@
 # Something you can assign to a variable
 class Rbindable
   attr_accessor :name
+  #: fn(String | Symbol)
   def initialize(name)
     @name = name
   end
@@ -128,6 +129,8 @@ end
 
 class Rmetaclass < Rbindable
   attr_reader :metaclass_for
+
+  #: fn(String, Rclass)
   def initialize(parent_name, metaclass_for)
     super("#{parent_name}:Class")
     @namespace = {}
@@ -141,6 +144,11 @@ class Rmetaclass < Rbindable
   #: fn(Rbindable)
   def define(rbindable)
     @namespace[rbindable.name] = rbindable
+  end
+
+  def supertype_of?(other)
+    # kindof nonsense. used to make 'is_a?' type def work
+    other.is_a?(Rmetaclass)
   end
 end
 
@@ -165,6 +173,7 @@ end
 
 class Rclass < Rbindable
   attr_reader :metaclass, :namespace, :parent, :template_params
+  #: fn(String, Rclass | Nil, template_params: Array<TemplateType>)
   def initialize(name, parent_class, template_params: [])
     @metaclass = Rmetaclass.new(name, self)
     super(name)
@@ -203,6 +212,7 @@ class Rclass < Rbindable
     end
   end
 
+  #: fn(Rbindable, bind_to: String | Nil) -> Rbindable
   def define(rbindable, bind_to: nil)
     if rbindable.is_a?(Rmetaclass)
       @namespace[bind_to || rbindable.metaclass_for.name] = rbindable
