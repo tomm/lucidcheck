@@ -87,7 +87,7 @@ class AnnotationParser
     end
   end
 
-  def parse_type
+  def parse_single_type
     if has 'fn'
       eat
       has '('
@@ -124,6 +124,20 @@ class AnnotationParser
         type
       end
     end
+  end
+
+  def parse_type
+    types = []
+    sum_of_types(
+      loop {
+        types << parse_single_type
+        if !has '|'
+          break types
+        else
+          expect! '|'
+        end
+      }
+    )
   end
 
   def eat

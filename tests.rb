@@ -711,7 +711,7 @@ class TestLucidCheck < Test::Unit::TestCase
        [30, :block_arg_type, "do_thing", "(Integer) > Integer", "(Integer) > Float"]],
       parse_str(
         <<-RUBY
-          #: fn(Integer)
+          #: fn(Integer | Nil)
           def a(x); nil end
           #: fn(Integer) -> Float
           def b(x); x end

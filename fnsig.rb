@@ -20,7 +20,7 @@ class FnSig
     args.each { |a| @args << [nil, a] }
   end
 
-  #: fn(Kwtype)
+  #: fn(Hash<String, Rbindable>)
   def set_kwargs(kwargs)
     @kwargs = kwargs
   end

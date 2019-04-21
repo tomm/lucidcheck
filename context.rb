@@ -972,7 +972,7 @@ class Context
         if !fn.is_constructor
           if fn.return_type == nil
             fn.return_type = ret
-          elsif fn.return_type != ret && !fn.return_type.is_a?(Rundefined)
+          elsif !fn.return_type.supertype_of?(ret) && !fn.return_type.is_a?(Rundefined)
             @errors << [node, :fn_return_type, fn.name, fn.return_type.name, ret.name]
           end
         end

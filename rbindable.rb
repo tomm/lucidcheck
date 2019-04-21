@@ -107,7 +107,7 @@ class Rfunc < Rbindable
     @sig.add_named_args(arg_name_type)
   end
 
-  #: fn(Kwtype)
+  #: fn(Hash<String, Rbindable>)
   def set_kwargs(kwargs)
     @sig.set_kwargs(kwargs)
   end
