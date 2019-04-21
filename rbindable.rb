@@ -27,6 +27,7 @@ end
 
 class Rbuiltin < Rbindable
   attr_reader :sig
+
   def initialize(name, sig, fn)
     super(name)
     @fn = fn
@@ -125,22 +126,6 @@ class Rfunc < Rbindable
   end
 end
 
-class Rmodule < Rbindable
-  def initialize(name)
-    super(name)
-    @namespace = {}
-  end
-
-  def lookup(method_name)
-    [@namespace[method_name], self]
-  end
-
-  #: fn(Rbindable)
-  def define(rbindable, bind_to: nil)
-    @namespace[bind_to || rbindable.name] = rbindable
-  end
-end
-
 class Rmetaclass < Rbindable
   attr_reader :metaclass_for
   def initialize(parent_name, metaclass_for)
@@ -156,6 +141,25 @@ class Rmetaclass < Rbindable
   #: fn(Rbindable)
   def define(rbindable)
     @namespace[rbindable.name] = rbindable
+  end
+end
+
+class Rmodule < Rbindable
+  attr_reader :metaclass
+
+  def initialize(name)
+    @metaclass = Rmetaclass.new(name, self)
+    super(name)
+    @namespace = {}
+  end
+
+  def lookup(method_name)
+    [@namespace[method_name], self]
+  end
+
+  #: fn(Rbindable)
+  def define(rbindable, bind_to: nil)
+    @namespace[bind_to || rbindable.name] = rbindable
   end
 end
 

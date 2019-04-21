@@ -4,7 +4,6 @@ require_relative 'rbindable'
 require_relative 'fnsig'
 require_relative 'annotations'
 require_relative 'types_core'
-require_relative 'kwtype'
 
 class Context
   attr_reader :rself
@@ -26,7 +25,7 @@ class Context
       when :type_unknown
         "Type '#{e[2]}' not found in this scope"
       when :ivar_assign_outside_constructor
-        "Instance variable assignment (of '#{e[2]}') outside the constructor is obfuscatory. Assignment ignored."
+        "Instance variable declaration (of '#{e[2]}') outside the constructor is obfuscatory. Assignment ignored."
       when :fn_unknown
         "Type '#{e[3]}' has no method named '#{e[2]}'"
       when :const_unknown
@@ -655,7 +654,7 @@ class Context
       @errors << [scope_top.caller_node || node, :no_block_given]
       @rundefined
     else
-      type_errors = block.sig.call_typecheck?(scope_top.caller_node || node, '<block>', passed_args, nil, mut_template_types, nil, scope_top.in_class)
+      type_errors = block.sig.call_typecheck?(scope_top.caller_node || node, '<block>', passed_args, {}, mut_template_types, nil, scope_top.in_class)
 
       if !type_errors.empty?
         @errors.concat(type_errors)
@@ -686,12 +685,12 @@ class Context
   def n_super(node)
     args = node.children.map {|n| n_expr(n) }
     fn, call_scope = scope_top.lookup_super
-    function_call(scope_top.in_class, call_scope, fn, node, args, nil, scope_top.passed_block)
+    function_call(scope_top.in_class, call_scope, fn, node, args, {}, scope_top.passed_block)
   end
 
   def n_zsuper(node)
     fn, call_scope = scope_top.lookup_super
-    function_call(scope_top.in_class, call_scope, fn, node, [], nil, scope_top.passed_block)
+    function_call(scope_top.in_class, call_scope, fn, node, [], {}, scope_top.passed_block)
   end
 
   def n_hash_literal(node)
@@ -882,11 +881,7 @@ class Context
     arg_types = arg_nodes.select { |n| n.type != :hash }.map {|n| n_expr(n) }
     kw_arg_node = arg_nodes.find { |n| n.type == :hash }
     
-    kwargs = if kw_arg_node.nil?
-               nil
-             else
-               n_kwargs(kw_arg_node)
-             end
+    kwargs = if kw_arg_node.nil? then {} else n_kwargs(kw_arg_node) end
 
     return @rundefined if type_scope.kind_of?(Rundefined)
 
@@ -907,7 +902,7 @@ class Context
       @errors << [node, :fn_unknown, name, type_scope.name]
       @rundefined
     elsif fn.kind_of?(Rbuiltin)
-      errs = fn.sig.nil? ? [] : fn.sig.call_typecheck?(node, fn.name, arg_types, nil, {}, nil, type_scope)
+      errs = fn.sig.nil? ? [] : fn.sig.call_typecheck?(node, fn.name, arg_types, {}, {}, nil, type_scope)
       if errs.empty?
         fn.call(node, type_scope, arg_nodes)
       else
@@ -960,7 +955,7 @@ class Context
       }
       # define lvars from kwargs
       if fn.sig.kwargs != nil
-        fn.sig.kwargs.map.each { |kv|
+        fn.sig.kwargs.each { |kv|
           function_scope.define_lvar(kv[0], kv[1])
         }
       end
@@ -1086,7 +1081,7 @@ class Context
       # don't know types of arguments or return type yet
       fn = Rfunc.new(name, nil, checked: false)
       fn.add_named_args(arg_name_type)
-      fn.set_kwargs(Kwtype.new(kwarg_name_type.to_h))
+      fn.set_kwargs(kwarg_name_type.to_h)
       fn.add_opt_args(optarg_name_type)
     end
     fn.node = node
@@ -1132,18 +1127,16 @@ class Context
     arg_types = fn.sig.args.map { |a| a[1] }
     block = Rblock.new([], nil, fn_scope, definition_only: true)
     block.sig = fn.block_sig
-    kwargs = fn.sig.kwargs&.clone
+    kwargs = fn.sig.kwargs.clone
 
     function_call(type_scope, call_scope, fn, fn.body, arg_types, kwargs, block)
   end
 
+  #: fn(Parser::AST::Node) -> Hash<String, Rbindable>
   def n_kwargs(node)
     raise "not kwargs" unless node.type == :hash
 
-    kwargs = node.children.map {|n| [n.children[0].children[0].to_s,
-                                       n_expr(n.children[1])] }.to_h
-
-    # not an Rbindable!
-    Kwtype.new(kwargs)
+    node.children.map {|n| [n.children[0].children[0].to_s,
+                            n_expr(n.children[1])] }.to_h
   end
 end

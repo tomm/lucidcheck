@@ -1,10 +1,12 @@
+require_relative 'typechecks'
+
 class FnSig
   attr_accessor :args, :return_type, :kwargs
 
   def initialize(return_type, anon_args)
     @args = []
     @optargs = []
-    @kwargs = nil
+    @kwargs = {}
     @return_type = return_type
     add_anon_args(anon_args)
   end
@@ -64,10 +66,8 @@ class FnSig
       return [[node, :fn_arg_num, fn_name, @args.length, passed_args.length]]
     end
 
-    if @kwargs != nil && kwargs != nil
-      kw_errors = @kwargs.check_and_learn(node, kwargs)
-      return kw_errors if !kw_errors.empty?
-    end
+    kw_errors = TypeChecks.check_and_learn_kwargs(node, @kwargs, kwargs)
+    return kw_errors if !kw_errors.empty?
 
     # collect arg types if we know none
     if type_unknown?
