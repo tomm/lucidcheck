@@ -84,6 +84,16 @@ class SelfType < Rbindable
   end
 end
 
+class Rlazydeffunc < Rbindable
+  attr_reader :node, :scope
+
+  def initialize(name, node, scope)
+    super(name)
+    @node = node
+    @scope = scope
+  end
+end
+
 class Rfunc < Rbindable
   attr_accessor :node, :body, :sig, :block_sig, :checked, :can_autocheck, :is_constructor
 

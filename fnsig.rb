@@ -140,7 +140,6 @@ class FnSig
     # set function signature to inferred types if inference happened
     if type_unknown?
       @args = accept_args
-      @optargs = accept_optargs
     end
     return errors
   end

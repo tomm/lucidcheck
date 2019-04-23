@@ -324,6 +324,10 @@ class Context
 
   def check_function_type_inference_succeeded(scope)
     process = ->(scope, thing) {
+      if thing.is_a?(Rlazydeffunc)
+        thing = define_lazydeffunc(thing)
+      end
+
       if thing.kind_of?(Rfunc)
         # never checked this function. if there is a type annotation
         # then we can check based on that
@@ -898,6 +902,8 @@ class Context
     # find actual class the method was retrieved from. eg may be parent class of 'type_scope'
     fn, call_scope = type_scope.lookup(name)
 
+    if fn.is_a?(Rlazydeffunc) then fn = define_lazydeffunc(fn) end
+
     if fn == nil
       @errors << [node, :fn_unknown, name, type_scope.name]
       @rundefined
@@ -928,6 +934,8 @@ class Context
   # call_scope = Object (because to_f is on Object)
   # fn = RFunc of whatever Object.method(:to_f) is
   def function_call(type_scope, call_scope, fn, node, args, kwargs, block)
+    if fn.is_a?(Rlazydeffunc) then fn = define_lazydeffunc(fn) end
+
     if fn.is_constructor
       if !call_scope.is_a?(Rmetaclass)
         raise 'constructor not called with scope of metaclass'
@@ -1070,7 +1078,7 @@ class Context
     [arg_name_type, optarg_name_type, kwarg_name_type]
   end
 
-  def define_method(node, name, args_node, fn_body, on_class)
+  def make_method(node, name, args_node, fn_body, on_class)
     arg_name_type, optarg_name_type, kwarg_name_type = parse_function_args_def(args_node)
     annot_type = get_annotation_for_node(node)
 
@@ -1104,17 +1112,36 @@ class Context
     name = node.children[0].to_s
 
     if name == 'initialize'
-      fn = define_method(node, 'new', node.children[1], node.children[2], scope_top.in_class)
+      scope_top.in_class.metaclass.define(
+        Rlazydeffunc.new('new', node, scope_top)
+      )
+    else
+      scope_top.in_class.define(
+        Rlazydeffunc.new(name, node, scope_top)
+      )
+    end
+  end
+
+  #: fn(Rlazydeffunc) -> Rfunc
+  def define_lazydeffunc(lazydef)
+    name = lazydef.name
+    node = lazydef.node
+    scope = lazydef.scope
+    
+    if name == 'new'
+      fn = make_method(node, 'new', node.children[1], node.children[2], scope.in_class)
       fn.is_constructor = true
       if fn.sig.no_args?
         fn.can_autocheck = true
       end
-      # note that return type of possible annotation is ignored
-      fn.return_type = scope_top.in_class
-      scope_top.in_class.metaclass.define(fn)
+      # XXX note that return type of possible annotation is ignored
+      fn.return_type = scope.in_class
+      scope.in_class.metaclass.define(fn)
+      fn
     else
-      fn = define_method(node, name, node.children[1], node.children[2], scope_top.in_class)
-      scope_top.in_class.define(fn)
+      fn = make_method(node, name, node.children[1], node.children[2], scope.in_class)
+      scope.in_class.define(fn)
+      fn
     end
   end
 
@@ -1124,7 +1151,7 @@ class Context
       raise "Checker bug. Expected self at #{node}"
     end
     name = node.children[1].to_s
-    fn = define_method(node, name, node.children[2], node.children[3], scope_top.in_class.metaclass)
+    fn = make_method(node, name, node.children[2], node.children[3], scope_top.in_class.metaclass)
     scope_top.in_class.metaclass.define(fn)
   end
 
