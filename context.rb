@@ -131,7 +131,7 @@ class Context
   def _check(filename, source)
     begin
       lines = source.split("\n")
-      @annotations = (1..lines.length).to_a.zip(lines).select { |item|
+      @annotations[filename] = (1..lines.length).to_a.zip(lines).select { |item|
         item[1].strip.slice(0, 3) == '#: '
       }.map { |i|
         annotation = i[1].strip.slice(3, i[1].length)  # strip '#: '
@@ -1048,7 +1048,7 @@ class Context
   end
 
   def get_annotation_for_node(node)
-    if (annot = @annotations[node.loc.line-1])
+    if (annot = @annotations[filename_of_node(node)][node.loc.line-1])
       type, error = AnnotationParser.new(annot, scope_top.method(:lookup)).get_type
       @errors << [node, :annotation_error, error] unless error == nil
       type
@@ -1078,6 +1078,7 @@ class Context
     [arg_name_type, optarg_name_type, kwarg_name_type]
   end
 
+  #: fn(Parser::AST::Node, String, Parser::AST::Node, Parser::AST::Node, Rclass) -> Rfunc
   def make_method(node, name, args_node, fn_body, on_class)
     arg_name_type, optarg_name_type, kwarg_name_type = parse_function_args_def(args_node)
     annot_type = get_annotation_for_node(node)
