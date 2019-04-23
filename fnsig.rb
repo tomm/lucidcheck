@@ -1,7 +1,7 @@
 require_relative 'typechecks'
 
 class FnSig
-  attr_accessor :args, :return_type, :kwargs
+  attr_accessor :args, :optargs, :return_type, :kwargs
 
   def initialize(return_type, anon_args)
     @args = []
@@ -37,9 +37,11 @@ class FnSig
   end
 
   def name_anon_args(names)
-    names.each_index { |i|
-      @args[i][0] = names[i]
-    }
+    names.each_index { |i| @args[i][0] = names[i] }
+  end
+
+  def name_optargs(names)
+    names.each_index { |i| @optargs[i][0] = names[i] }
   end
 
   def type_unknown?
@@ -60,74 +62,103 @@ class FnSig
   end
 
   ##: fn(Array[Rbindable]) > Array[error]
-  def call_typecheck?(node, fn_name, passed_args, kwargs, mut_template_types, block, self_type)
+  def call_typecheck?(node, fn_name, passed_args_n_optargs, passed_kwargs, mut_template_types, block, self_type)
 
-    if passed_args.length != @args.length
-      return [[node, :fn_arg_num, fn_name, @args.length, passed_args.length]]
+    errors = []
+
+    function_call_type_error = ->() {
+      [node, :fn_arg_type, fn_name,
+       args_to_s(mut_template_types),
+       passed_args_n_optargs.map(&:name).join(',')
+      ]
+    }
+  
+    check_passed_args = ->(accept_args, passed_args, can_default) {
+      # type check arguments
+      accept_args.zip(passed_args).each { |definition, passed|
+        def_type = definition[1]
+        passed = def_type if can_default && passed.nil?
+        if def_type.is_a?(TemplateType)
+          #template arg
+          t = mut_template_types[def_type]
+          if t.nil? || t.is_a?(TemplateType)
+            if self_type.is_a?(Rconcreteclass)
+              if self_type.specialize(def_type, passed) == false
+                return [function_call_type_error.()]
+              end
+            end
+            mut_template_types[def_type] = passed
+          elsif !t.supertype_of?(passed)
+            return [function_call_type_error.()]
+          end
+        else
+          # normal arg
+          if (def_type.is_a?(SelfType) && self_type.supertype_of?(passed)) ||
+              (!def_type.is_a?(SelfType) && def_type.supertype_of?(passed))
+            # type check passed
+          else
+            return [function_call_type_error.()]
+          end
+        end
+      }
+      []
+    }
+
+    if passed_args_n_optargs.length < @args.length || passed_args_n_optargs.length > @args.length + @optargs.length
+      num_required =
+        if @optargs.length > 0 then "#{@args.length}..#{@args.length + @optargs.length}"
+        else @args.length end
+      return [[node, :fn_arg_num, fn_name, num_required, passed_args_n_optargs.length]]
     end
 
-    kw_errors = TypeChecks.check_and_learn_kwargs(node, @kwargs, kwargs)
+    # type check kwargs
+    kw_errors = TypeChecks.check_and_learn_kwargs(node, @kwargs, passed_kwargs)
     return kw_errors if !kw_errors.empty?
 
     # collect arg types if we know none
     if type_unknown?
       accept_args = @args.clone
-      passed_args.each_with_index { |a, i| accept_args[i][1] = a }
+      passed_args_n_optargs.take(accept_args.length).each_with_index { |a, i| accept_args[i][1] = a }
     else
       accept_args = @args
     end
 
-    # type check arguments
-    accept_args.zip(passed_args).each { |definition, passed|
-      def_type = definition[1]
-      if def_type.is_a?(TemplateType)
-        #template arg
-        t = mut_template_types[def_type]
-        if t.nil? || t.is_a?(TemplateType)
-          if self_type.is_a?(Rconcreteclass)
-            if self_type.specialize(def_type, passed) == false
-              return [function_call_type_error(node, fn_name, passed_args, mut_template_types)]
-            end
-          end
-          mut_template_types[def_type] = passed
-        elsif !t.supertype_of?(passed)
-          return [function_call_type_error(node, fn_name, passed_args, mut_template_types)]
-        end
-      else
-        # normal arg
-        if (def_type.is_a?(SelfType) && self_type.supertype_of?(passed)) ||
-            (!def_type.is_a?(SelfType) && def_type.supertype_of?(passed))
-          # type check passed
-        else
-          return [function_call_type_error(node, fn_name, passed_args, mut_template_types)]
-        end
+    # if an optargs defaults to nil, learn what other type it can take
+    passed_args_n_optargs.drop(accept_args.length).each_with_index { |a, i|
+      # XXX should compare with @rnil...
+      if @optargs[i][1].name == 'Nil'
+        @optargs[i][1] = sum_of_types([ @optargs[i][1], a ])
       end
     }
+
+    # type check mandatory arguments
+    errors.concat(check_passed_args.(accept_args, passed_args_n_optargs, false))
+    # type check optional arguments
+    errors.concat(check_passed_args.(@optargs, passed_args_n_optargs.drop(accept_args.length), true))
+
     # success
     # set function signature to inferred types if inference happened
     if type_unknown?
       @args = accept_args
+      @optargs = accept_optargs
     end
-    return []
+    return errors
   end
 
   def args_to_s(template_types = {})
-    @args.map { |a| template_types[a[1]]&.name || a[1]&.name || '?' }.join(',')
+    (@args.map { |a| template_types[a[1]]&.name || a[1]&.name || 'unknown' } +
+     @optargs.map { |a| template_types[a[1]]&.name || a[1]&.name || 'unknown' }.map { |n| '?' + n }
+     #+ @kwargs.map { |kv| "#{kv[0]}: #{kv[1].name}" }
+    )
+      .join(',')
   end
 
   def sig_to_s(template_types = {})
-    "(#{args_to_s(template_types)}) > #{(template_types[@return_type] || @return_type)&.name || '?'}"
+    "(#{args_to_s(template_types)}) > #{(template_types[@return_type] || @return_type)&.name || 'unknown'}"
   end
 
   def to_s
     sig_to_s({})
-  end
-
-  private
-
-  #: fn() > Array[error]
-  def function_call_type_error(node, fn_name, passed_args, template_types)
-    [node, :fn_arg_type, fn_name, args_to_s(template_types), passed_args.map(&:name).join(',')]
   end
 end
 

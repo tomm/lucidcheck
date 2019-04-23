@@ -953,6 +953,12 @@ class Context
           a[0], template_types[a[1]] || a[1]
         )
       }
+      # define lvars from normal arguments
+      fn.sig.optargs.each { |a|
+        function_scope.define_lvar(
+          a[0], template_types[a[1]] || a[1]
+        )
+      }
       # define lvars from kwargs
       if fn.sig.kwargs != nil
         fn.sig.kwargs.each { |kv|
@@ -1071,11 +1077,14 @@ class Context
     if annot_type
       fn = annot_type
       fn.name = name
-      # XXX update for kwarg and optarg nums!! XXX
+      # XXX update for kwarg nums!! XXX
       if arg_name_type.length != annot_type.sig.args.length
         @errors << [node, :annotation_error, "Number of arguments (#{arg_name_type.length}) does not match annotation (#{annot_type.sig.args.length})"]
+      elsif optarg_name_type.length != annot_type.sig.optargs.length
+        @errors << [node, :annotation_error, "Number of optional arguments (#{optarg_name_type.length}) does not match annotation (#{annot_type.sig.optargs.length})"]
       else
         fn.sig.name_anon_args(arg_name_type.map { |nt| nt[0] })
+        fn.sig.name_optargs(optarg_name_type.map { |nt| nt[0] })
       end
     else
       # don't know types of arguments or return type yet

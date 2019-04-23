@@ -1290,4 +1290,39 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
   end
+
+  def test_optargs
+    assert_equal(
+      [[4, :fn_arg_type, 'f', "Integer,?Float,?Nil", "Integer,Integer"],
+       [8, :fn_arg_type, 'f', "Integer,?Float,?Nil | String", "Integer,Float,Symbol"],
+       [9, :fn_arg_num, 'f', "1..3", 4],
+       [15, :fn_arg_type, 'g', "Integer,?Float,?Nil | String", "Integer,Integer"],
+       [19, :fn_arg_type, 'g', "Integer,?Float,?Nil | String", "Integer,Float,Symbol"],
+       [20, :fn_arg_num, 'g', "1..3", 4]],
+      parse_str(
+        <<-RUBY
+          def f(w,x=4.0,y=nil, z: :oio)
+          end
+          f(1,z: :hi)
+          f(1,2,z: :hi)  # fail
+          f(1,2.0,z: :hi)
+          f(1,2.0,"hi",z: :hi)
+          f(1,2.0,nil,z: :hi)
+          f(1,2.0,:hi,z: :hi)  # fail
+          f(1,2.0,nil,3,z: :hi)  # fail
+
+          #: fn(Integer, ?Float, ?Nil | String, z: Symbol)
+          def g(w,x=4.0,y=nil, z: :oio)
+          end
+          g(1,z: :hi)
+          g(1,2,z: :hi)  # fail
+          g(1,2.0,z: :hi)
+          g(1,2.0,"hi",z: :hi)
+          g(1,2.0,nil,z: :hi)
+          g(1,2.0,:hi,z: :hi)  # fail
+          g(1,2.0,nil,3,z: :hi)  # fail
+        RUBY
+      )
+    )
+  end
 end

@@ -87,7 +87,7 @@ end
 class Rfunc < Rbindable
   attr_accessor :node, :body, :sig, :block_sig, :checked, :can_autocheck, :is_constructor
 
-  #: fn(String, Rbindable, Array<Rbindable>)
+  #: fn(String, Rbindable, ?Array<Rbindable>, is_constructor: Boolean, block_sig: FnSig, checked: Boolean, can_autocheck: Boolean)
   def initialize(name, return_type, anon_args = [], is_constructor: false, block_sig: nil, checked: true, can_autocheck: false)
     super(name)
     @sig = FnSig.new(return_type, anon_args)

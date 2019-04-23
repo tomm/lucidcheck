@@ -104,6 +104,7 @@ class AnnotationParser
       eat
       has '('
       args = []
+      optargs = []
       kwargs = {}
       block_sig = nil
       loop {
@@ -114,6 +115,9 @@ class AnnotationParser
         elsif !has ')'
           if has_ahead(1, ':')
             kwargs = parse_kwargs
+          elsif has '?'
+            expect! '?'
+            optargs.push([nil, parse_type])
           else
             args.push(parse_type)
           end
@@ -131,6 +135,7 @@ class AnnotationParser
 
       fn = Rfunc.new(nil, return_type, args, block_sig: block_sig, can_autocheck: true, checked: false)
       fn.set_kwargs(kwargs)
+      fn.add_opt_args(optargs)
       fn
     else
       type = lookup(eat)
