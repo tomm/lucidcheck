@@ -45,7 +45,11 @@ class AnnotationParser
 
   #: fn() -> Tuple<Rbindable, String | Nil>
   def get_type
+    unsafe = has 'unsafe'
+    if unsafe then eat end
+
     type = parse_type
+    type.unsafe = unsafe
     raise AnnotationError, "malformed annotation" unless @tokens.empty?
     [type, nil]
   rescue AnnotationError => e

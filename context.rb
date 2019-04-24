@@ -102,7 +102,6 @@ class Context
     @rnil = @robject.lookup('Nil')[0].metaclass_for
     @rboolean = @robject.lookup('Boolean')[0].metaclass_for
     @rstring = @robject.lookup('String')[0].metaclass_for
-    @rsymbol = @robject.lookup('Symbol')[0].metaclass_for
     @rinteger = @robject.lookup('Integer')[0].metaclass_for
     @rarray = @robject.lookup('Array')[0].metaclass_for
     @rtuple = @robject.lookup('Tuple')[0].metaclass_for
@@ -117,6 +116,10 @@ class Context
     @required = []
     @node_filename_map = {}
     @scopestack = [FnScope.new(nil, nil, nil, @robject, nil, nil)]
+
+    _check('core', File.open(__dir__ + '/headers/core.rb').read)
+
+    @rsymbol = @robject.lookup('Symbol')[0].metaclass_for
   end
 
   def check(filename, source)
@@ -1103,9 +1106,12 @@ class Context
       fn.add_opt_args(optarg_name_type)
     end
     fn.node = node
-    fn.body = fn_body
-    # can assume return type of nil if body is empty
-    if fn.body == nil then fn.return_type = @rnil end
+
+    if !fn.unsafe
+      fn.body = fn_body
+      # can assume return type of nil if body is empty
+      if fn.body == nil then fn.return_type = @rnil end
+    end
     fn
   end
 

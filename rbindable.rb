@@ -1,9 +1,10 @@
 # Something you can assign to a variable
 class Rbindable
-  attr_accessor :name
+  attr_accessor :name, :unsafe
   #: fn(String | Symbol)
   def initialize(name)
     @name = name
+    @unsafe = false
   end
 
   def new_inst
@@ -183,8 +184,8 @@ end
 
 class Rclass < Rbindable
   attr_reader :metaclass, :namespace, :parent, :template_params
-  #: fn(String, Rclass | Nil, template_params: Array<TemplateType>)
-  def initialize(name, parent_class, template_params: [])
+  #: fn(String, Rclass | Nil, ?Array<TemplateType>)
+  def initialize(name, parent_class, template_params=[])
     @metaclass = Rmetaclass.new(name, self)
     super(name)
     @parent = parent_class
@@ -231,6 +232,13 @@ class Rclass < Rbindable
       @namespace[bind_to || rbindable.name] = rbindable
       rbindable
     end
+  end
+
+  #: fn(Rclass) -> Rclass
+  def classdef(name, parent_class, template_params=[])
+    c = Rclass.new(name, parent_class, template_params)
+    @namespace[name] = c.metaclass
+    c
   end
 
   # permits under-specialization. this is needed for tuples, which have

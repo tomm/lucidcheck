@@ -6,22 +6,21 @@ def make_robject
   _T = TemplateType.new
   _U = TemplateType.new
   # denny is right
-  rstring  = robject.define(Rclass.new('String', robject).metaclass)
-  rsymbol  = robject.define(Rclass.new('Symbol', robject).metaclass)
-  rnil     = robject.define(Rclass.new('Nil', robject).metaclass)
-  rinteger = robject.define(Rclass.new('Integer', robject).metaclass)
-  rfloat   = robject.define(Rclass.new('Float', robject).metaclass)
-  rboolean = robject.define(Rclass.new('Boolean', robject).metaclass)
-  rarray   = robject.define(Rclass.new('Array', robject, template_params: [_T]).metaclass)
-  rtuple   = robject.define(Rclass.new('Tuple', robject, 
-                            template_params: ([TemplateType]*16).map(&:new)).metaclass)
-  rhash    = robject.define(Rclass.new('Hash', robject, template_params: [_K, _V]).metaclass)
-  rrange   = robject.define(Rclass.new('Range', robject, template_params: [_T]).metaclass)
-  rfile    = robject.define(Rclass.new('File', robject).metaclass)
+  rstring  = robject.classdef('String', robject)
+  #rsymbol  = robject.classdef('Symbol', robject)
+  rnil     = robject.classdef('Nil', robject)
+  rinteger = robject.classdef('Integer', robject)
+  rfloat   = robject.classdef('Float', robject)
+  rboolean = robject.classdef('Boolean', robject)
+  rarray   = robject.classdef('Array', robject, [_T])
+  rtuple   = robject.classdef('Tuple', robject, ([TemplateType]*16).map(&:new))
+  rhash    = robject.classdef('Hash', robject, [_K, _V])
+  rrange   = robject.classdef('Range', robject, [_T])
+  rfile    = robject.classdef('File', robject)
   # or is he? :-/
-  rexception = robject.define(Rclass.new('Exception', robject).metaclass)
-  rstandarderror = robject.define(Rclass.new('StandardError', rexception).metaclass)
-  rruntimeerror = robject.define(Rclass.new('RuntimeError', rstandarderror).metaclass)
+  rexception = robject.classdef('Exception', robject)
+  rstandarderror = robject.classdef('StandardError', rexception)
+  rruntimeerror = robject.classdef('RuntimeError', rstandarderror)
   rself    = robject.define(SelfType.new)
 
   robject.define(rarray[[rstring]], bind_to: 'ARGV')
