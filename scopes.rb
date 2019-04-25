@@ -1,7 +1,29 @@
 # XXX need way to set types of abstract methods, and enforce in implementation
 class Scope
+  def initialize(selftype)
+    @namespace = {}
+    @selftype = selftype
+  end
+
+  def in_class
+    @selftype
+  end
+
+  #: fn(String) -> Tuple<Rbindable, Rbindable>
+  def lookup(name)
+    [@namespace[name], @selftype]
+  end
+
+  #: fn(Rbindable, ?String)
+  def define(rbindable, bind_to=nil)
+    @namespace[bind_to || rbindable.name] = rbindable
+  end
+
+  def each_value
+    @namespace.each_value { |v| yield v }
+  end
+
   def lookup_super; raise NotImplementedError end
-  def lookup; raise NotImplementedError end
   def define_lvar(name, rbindable); raise NotImplementedError end
   def define_ivar(name, rbindable); raise NotImplementedError end
   def is_identical_fn_call_in_stack?(node, block); raise NotImplementedError end
@@ -10,18 +32,18 @@ end
 # Used to forbid sloppy scoping in 'if', 'case', 'rescue' etc
 class WeakScope < Scope
   def initialize(parent_scope)
+    super(parent_scope.in_class)
     @parent = parent_scope
-    @local_scope = {}
   end
 
   def lookup(name)
-    r = [@local_scope[name], @parent.in_class]
-    if r[0] == nil then @parent.lookup(name) else r end
+    r = super(name)
+    r[0].nil? ? @parent.lookup(name) : r
   end
 
   def define_lvar(name, rbindable)
     if @parent.lookup(name)[0] == nil
-      @local_scope[name] = rbindable
+      define(rbindable, name)
     else
       raise CheckerBug, "tried to define shadowing variable on WeakScope"
     end
@@ -39,11 +61,10 @@ class WeakScope < Scope
 end
 
 class FnScope < Scope
-  attr_reader :passed_block, :is_constructor, :caller_node, :in_class, :return_vals
+  attr_reader :passed_block, :is_constructor, :caller_node, :return_vals
   #: fn(Rmetaclass | Rclass, Rblock | nil)
   def initialize(caller_node, caller_scope, fn_body_node, in_class, parent_scope, passed_block, is_constructor: false)
-    @in_class = in_class
-    @local_scope = {}
+    super(in_class)
     @parent_scope = parent_scope
     @passed_block = passed_block
     @is_constructor = is_constructor
@@ -63,8 +84,8 @@ class FnScope < Scope
   end
 
   def lookup_super
-    if @in_class.parent&.metaclass
-      @in_class.parent.metaclass.lookup('new')
+    if in_class.parent&.metaclass
+      in_class.parent.metaclass.lookup('new')
     else
       [nil, nil]
     end
@@ -73,17 +94,17 @@ class FnScope < Scope
   #: fn(String) > [Rbindable, Rbindable]
   # returns       [object, scope]
   def lookup(name)
-    r = [@local_scope[name], @in_class]
+    r = super(name)
     if r[0] == nil && @parent_scope then r = @parent_scope.lookup(name) end
-    if r[0] == nil then r = @in_class.lookup(name) end
+    if r[0] == nil then r = in_class.lookup(name) end
     r
   end
 
   def define_lvar(name, rbindable)
-    @local_scope[name] = rbindable
+    define(rbindable, name)
   end
 
   def define_ivar(name, rbindable)
-    @in_class.define(rbindable, bind_to: name)
+    in_class.define(rbindable, bind_to: name)
   end
 end

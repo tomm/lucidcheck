@@ -465,7 +465,6 @@ class TestLucidCheck < Test::Unit::TestCase
     assert_equal(
       [[4, :fn_arg_type, '[]=', 'Integer,Integer', 'Integer,String'],
        [7, :fn_arg_type, 'push', 'Integer', 'Nil'],
-       [8, :var_type, 'a', 'Array<Integer>', 'Array<generic>'],
        [10, :fn_arg_type, 'include?', 'Integer', 'Float'],
        [12, :var_type, 'a', 'Array<Integer>', 'Array<Float>'],
        [15, :fn_arg_type, 'push', 'String', 'Integer'],
@@ -479,7 +478,7 @@ class TestLucidCheck < Test::Unit::TestCase
           b = a.push(3)
           a = b
           b.push(nil)  # fails
-          a = Array.new  # fails
+          a = Array.new
           a.include?(3)
           a.include?(4.5)  # fails
           c = a.map { |i| i.to_f }
@@ -1370,6 +1369,21 @@ class TestLucidCheck < Test::Unit::TestCase
               @z = 1
             end
           end
+        RUBY
+      )
+    )
+  end
+
+  def test_generic_specialization_by_passing
+    assert_equal(
+      [[5, :var_type, 'x', 'Array<Integer>', 'Nil']],
+      parse_str(
+        <<-RUBY
+          #: unsafe fn(Array<Integer>)
+          def f(a); end
+          x = []
+          f(x)
+          x = nil  # fails
         RUBY
       )
     )

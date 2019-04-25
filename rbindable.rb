@@ -60,8 +60,9 @@ class Rrecursion < Rbindable
     super(:unannotated_recursive_function)
   end
 
+  #: fn(String) -> Tuple<Rbindable | Nil, Rbindable | Nil>
   def lookup(name)
-    [nil, nil]
+    [nil, self]
   end
 end
 
@@ -70,8 +71,9 @@ class TemplateType < Rbindable
     super(:generic)
   end
 
+  #: fn(String) -> Tuple<Rbindable | Nil, Rbindable | Nil>
   def lookup(name)
-    [nil, nil]
+    [nil, self]
   end
 
   def supertype_of?(other)
@@ -139,22 +141,22 @@ class Rfunc < Rbindable
 end
 
 class Rmetaclass < Rbindable
-  attr_reader :metaclass_for
+  attr_reader :metaclass_for, :scope
 
   #: fn(String, Rclass)
   def initialize(parent_name, metaclass_for)
     super("#{parent_name}:Class")
-    @namespace = {}
+    @scope = Scope.new(self)
     @metaclass_for = metaclass_for
   end
 
+  #: fn(String) -> Tuple<Rbindable | Nil, Rbindable | Nil>
   def lookup(method_name)
-    [@namespace[method_name], self]
+    @scope.lookup(method_name)
   end
 
-  #: fn(Rbindable)
-  def define(rbindable)
-    @namespace[rbindable.name] = rbindable
+  def define(rbindable, bind_to: nil)
+    @scope.define(rbindable, bind_to)
   end
 
   def supertype_of?(other)
@@ -164,32 +166,32 @@ class Rmetaclass < Rbindable
 end
 
 class Rmodule < Rbindable
-  attr_reader :metaclass
+  attr_reader :metaclass, :scope
 
   def initialize(name)
     @metaclass = Rmetaclass.new(name, self)
+    @scope = Scope.new(self)
     super(name)
-    @namespace = {}
   end
 
+  #: fn(String) -> Tuple<Rbindable | Nil, Rbindable | Nil>
   def lookup(method_name)
-    [@namespace[method_name], self]
+    @scope.lookup(method_name)
   end
 
-  #: fn(Rbindable)
   def define(rbindable, bind_to: nil)
-    @namespace[bind_to || rbindable.name] = rbindable
+    @scope.define(rbindable, bind_to)
   end
 end
 
 class Rclass < Rbindable
-  attr_reader :metaclass, :namespace, :parent, :template_params, :can_underspecialize
+  attr_reader :metaclass, :scope, :parent, :template_params, :can_underspecialize
   #: fn(String, Rclass | Nil, ?Array<TemplateType>, can_underspecialize: Boolean)
   def initialize(name, parent_class, template_params=[], can_underspecialize: false)
     @metaclass = Rmetaclass.new(name, self)
     super(name)
     @parent = parent_class
-    @namespace = {}
+    @scope = Scope.new(self)
     @template_params = template_params
     @can_underspecialize = can_underspecialize
   end
@@ -213,37 +215,35 @@ class Rclass < Rbindable
   def add_template_params_scope(mut_template_types)
   end
 
-  def lookup(method_name)
-    m = @namespace[method_name]
-    if m
-      [m, self]
-    elsif @parent
-      @parent.lookup(method_name)
+  #: fn(String) -> Tuple<Rbindable | Nil, Rbindable | Nil>
+  def lookup(name)
+    m = @scope.lookup(name)
+    if m[0].nil? && @parent
+      @parent.lookup(name)
     else
-      [nil, nil]
+      m
     end
   end
 
-  #: fn(Rbindable, bind_to: String | Nil) -> Rbindable
+  #: fn(Rbindable, bind_to: String | Nil)
   def define(rbindable, bind_to: nil)
     if rbindable.is_a?(Rmetaclass)
-      @namespace[bind_to || rbindable.metaclass_for.name] = rbindable
-      rbindable.metaclass_for
+      @scope.define(rbindable, bind_to || rbindable.metaclass_for.name)
     else
-      @namespace[bind_to || rbindable.name] = rbindable
-      rbindable
+      @scope.define(rbindable, bind_to || rbindable.name)
     end
   end
 
-  #: fn(String, Rclass, ?Array<TemplateType>) -> Rclass
+  #: fn(String, Rclass, ?Array<TemplateType>, can_underspecialize: Boolean) -> Rclass
   def classdef(name, parent_class, template_params=[], can_underspecialize: false)
     c = Rclass.new(name, parent_class, template_params, can_underspecialize: can_underspecialize)
-    @namespace[name] = c.metaclass
+    @scope.define(c.metaclass, name)
     c
   end
 
   # permits under-specialization. this is needed for tuples, which have
   # have 8 generic params (max tuple length 8) but n-tuple only uses n
+  #: fn(Array<Rbindable>) -> Rconcreteclass
   def [](specialization)
     Rconcreteclass.new(
       self, 
@@ -289,8 +289,10 @@ class Rconcreteclass < Rbindable
   def type
     @template_class.type
   end
-  def lookup(method_name)
-    @template_class.lookup(method_name)
+
+  #: fn(String) -> Tuple<Rbindable | Nil, Rbindable | Nil>
+  def lookup(name)
+    @template_class.lookup(name)
   end
 
   #: fn(Rbindable)
@@ -319,7 +321,13 @@ class Rconcreteclass < Rbindable
     if other.is_a?(Rconcreteclass) && other.template_class.equal?(template_class)
       if @specialization.keys == other.specialization.keys
         @specialization.keys.map { |k|
-          @specialization[k].supertype_of?(other.specialization[k])
+          if other.specialization[k].is_a?(TemplateType) &&
+              !@specialization[k].is_a?(Rconcreteclass)
+            # specialize it
+            other.specialize(k, @specialization[k])
+          else
+            @specialization[k].supertype_of?(other.specialization[k])
+          end
         }.all?
       else
         false
@@ -353,6 +361,7 @@ class Rsumtype < Rbindable
     end
   end
 
+  #: fn(String) -> Tuple<Rbindable | Nil, Rbindable | Nil>
   def lookup(name)
     @base_type&.lookup(name) || [nil, nil]
   end

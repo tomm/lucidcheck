@@ -5,6 +5,8 @@ def make_robject
   _V = TemplateType.new
   _T = TemplateType.new
   _U = TemplateType.new
+  rself = SelfType.new
+  robject.define(rself)
   # denny is right
   rstring  = robject.classdef('String', robject)
   #rsymbol  = robject.classdef('Symbol', robject)
@@ -21,7 +23,6 @@ def make_robject
   rexception = robject.classdef('Exception', robject)
   rstandarderror = robject.classdef('StandardError', rexception)
   rruntimeerror = robject.classdef('RuntimeError', rstandarderror)
-  rself    = robject.define(SelfType.new)
 
   robject.define(rarray[[rstring]], bind_to: 'ARGV')
   robject.define(rstring, bind_to: '$0')
@@ -50,6 +51,7 @@ def make_robject
   rarray.define(Rfunc.new('length', rinteger, []))
   rarray.define(Rfunc.new('clear', rself, []))
   rarray.define(Rfunc.new('push', rself, [_T]))
+  rarray.define(Rfunc.new('<<', rself, [_T]))
   rarray.define(Rfunc.new('*', rself, [rinteger]))
   rarray.define(Rfunc.new('[]', _T, [rinteger]))
   rarray.define(Rfunc.new('[]=', _T, [rinteger, _T]))

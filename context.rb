@@ -117,7 +117,9 @@ class Context
     @annotations = {}
     @required = []
     @node_filename_map = {}
-    @scopestack = [FnScope.new(nil, nil, nil, @robject, nil, nil)]
+    #: Array<Scope>
+    @scopestack = []
+    push_scope(FnScope.new(nil, nil, nil, @robject, nil, nil))
 
     _check('core', File.open(__dir__ + '/headers/core.rb').read)
 
@@ -353,7 +355,7 @@ class Context
         process.(scope.metaclass, constructor)
       end
     end
-    scope.namespace.each_value { |bindable|
+    scope.scope.each_value { |bindable|
       process.(scope, bindable)
     }
   end
@@ -366,7 +368,6 @@ class Context
     @scopestack.pop
   end
 
-  #: fn(FnScope)
   def push_scope(fnscope)
     @scopestack.push(fnscope)
   end
