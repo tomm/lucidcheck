@@ -183,14 +183,15 @@ class Rmodule < Rbindable
 end
 
 class Rclass < Rbindable
-  attr_reader :metaclass, :namespace, :parent, :template_params
-  #: fn(String, Rclass | Nil, ?Array<TemplateType>)
-  def initialize(name, parent_class, template_params=[])
+  attr_reader :metaclass, :namespace, :parent, :template_params, :can_underspecialize
+  #: fn(String, Rclass | Nil, ?Array<TemplateType>, can_underspecialize: Boolean)
+  def initialize(name, parent_class, template_params=[], can_underspecialize: false)
     @metaclass = Rmetaclass.new(name, self)
     super(name)
     @parent = parent_class
     @namespace = {}
     @template_params = template_params
+    @can_underspecialize = can_underspecialize
   end
 
   def max_template_params
@@ -234,9 +235,9 @@ class Rclass < Rbindable
     end
   end
 
-  #: fn(Rclass) -> Rclass
-  def classdef(name, parent_class, template_params=[])
-    c = Rclass.new(name, parent_class, template_params)
+  #: fn(String, Rclass, ?Array<TemplateType>) -> Rclass
+  def classdef(name, parent_class, template_params=[], can_underspecialize: false)
+    c = Rclass.new(name, parent_class, template_params, can_underspecialize: can_underspecialize)
     @namespace[name] = c.metaclass
     c
   end
@@ -280,6 +281,11 @@ class Rconcreteclass < Rbindable
   def is_fully_specialized?
     !@specialization.map {|kv| kv[1].is_a?(TemplateType)}.any?
   end
+
+  def is_fully_unspecialized?
+    @specialization.map {|kv| kv[1].is_a?(TemplateType)}.all?
+  end
+
   def type
     @template_class.type
   end

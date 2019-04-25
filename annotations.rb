@@ -147,7 +147,19 @@ class AnnotationParser
         expect! '<'
         specializations = get_type_list
         expect! '>'
-        type[specializations]
+        if type.can_underspecialize
+          if specializations.length <= type.template_params.length && type.can_underspecialize
+            type[specializations]
+          else
+            raise AnnotationError, "type #{type.name} requires <= #{type.template_params.length} specializations. found #{specializations.length}"
+          end
+        else
+          if specializations.length == type.template_params.length
+            type[specializations]
+          else
+            raise AnnotationError, "type #{type.name} requires exactly #{type.template_params.length} specializations. found #{specializations.length}"
+          end
+        end
       else
         type
       end

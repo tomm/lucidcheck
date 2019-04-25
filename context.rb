@@ -70,6 +70,8 @@ class Context
         "Invalid exception type in 'rescue': #{e[2]}"
       when :require_error
         e[2]
+      when :annotation_mismatch
+        "Type is annotated as #{e[2]}, but found #{e[3]}"
       when :annotation_error
         e[2]
       when :checker_bug
@@ -486,7 +488,7 @@ class Context
   
   def n_masgn(node)
     lhs_node = node.children[0]
-    rhs = n_expr(node.children[1])
+    rhs = read_rhs_type(node, node.children[1])
     raise "expected mlhs" if lhs_node.type != :mlhs
     if !rhs.is_specialization_of?(@rtuple)
       @errors << [node, :masgn_rhs_type, rhs.name]
@@ -789,7 +791,7 @@ class Context
   # assign instance variable
   def n_ivasgn(node)
     name = node.children[0].to_s
-    type = n_expr(node.children[1])
+    type = read_rhs_type(node, node.children[1])
     ivasgn(node, name, type)
   end
 
@@ -811,9 +813,32 @@ class Context
     type
   end
 
+  def read_rhs_type(annotation_node, rhs_node)
+    annot_type = get_annotation_for_node(annotation_node)
+    if annot_type&.unsafe
+      annot_type
+    else
+      type = n_expr(rhs_node)
+      if annot_type != nil
+        if annot_type.is_a?(Rconcreteclass) && 
+            type.is_a?(Rconcreteclass) &&
+            type.is_fully_unspecialized? && 
+            type.template_class == annot_type.template_class then
+          # they are specializations of the same class, but 'type'
+          # is not specialized yet. take specialization from annotation. 
+        elsif !annot_type.supertype_of?(type)
+          @errors << [annotation_node, :annotation_mismatch, annot_type.name, type.name]
+        end
+        annot_type
+      else
+        type
+      end
+    end
+  end
+
   def n_lvasgn(node)
     name = node.children[0].to_s
-    type = n_expr(node.children[1])
+    type = read_rhs_type(node, node.children[1])
     lvasgn(node, name, type)
   end
 
@@ -833,7 +858,7 @@ class Context
 
   def n_casgn(node)
     name = node.children[1].to_s
-    type = n_expr(node.children[2])
+    type = read_rhs_type(node, node.children[2])
 
     if type == nil
       # error already reported. do nothing

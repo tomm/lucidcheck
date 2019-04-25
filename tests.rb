@@ -1325,4 +1325,53 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
   end
+
+  def test_variable_annotations
+    assert_equal(
+      [[3, :fn_arg_type, 'push', 'Integer', 'Float'],
+       [5, :annotation_error, 'type Hash requires exactly 2 specializations. found 1'],
+       [14, :var_type, 'f', 'Integer', 'Float'],
+       [15, :var_type, 'g', 'String', 'Symbol'],
+       [17, :annotation_mismatch, 'Integer', 'Nil'],
+       [21, :annotation_mismatch, 'String', 'Integer'],
+       [25, :annotation_error, 'type Array requires exactly 1 specializations. found 2'],
+       [28, :fn_arg_type, 'push', 'Integer', 'Float']],
+      parse_str(
+        <<-RUBY
+          #: Array<Integer>
+          b = []
+          b.push(3.0)  # fail
+          #: Hash<Integer>
+          c = {}  # fail
+          c[2] = 3
+          #: Hash<Integer, Integer>
+          d = {}
+          d[2] = 3
+          #: Tuple<Integer, String>
+          e = [2, 'hi']
+          #: unsafe Tuple<Integer,String,Symbol>
+          f,g,h = i
+          f = 2.0  # fail
+          g = :hi  # fail
+          #: Integer
+          j = nil  # fail
+          #: unsafe Integer
+          k = nil
+          #: String
+          L = 2  # fail
+          class A
+            def initialize
+              #: Array<Integer,Integer>
+              @x = []  # fail
+              #: Array<Integer>
+              @y = []
+              @y.push(2.0)  # fail
+              #: unsafe String
+              @z = 1
+            end
+          end
+        RUBY
+      )
+    )
+  end
 end
