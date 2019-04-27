@@ -27,6 +27,7 @@ def make_robject
   robject.define(rarray[[rstring]], bind_to: 'ARGV')
   robject.define(rstring, bind_to: '$0')
   robject.define(Rfunc.new('!', rboolean, []))
+  robject.define(Rfunc.new('!=', rboolean, [robject]))
   robject.define(Rfunc.new('puts', rnil, [rstring]))
   robject.define(Rfunc.new('p', _T, [_T]))
   robject.define(Rfunc.new('exit', rnil, [rinteger]))
@@ -60,6 +61,7 @@ def make_robject
   rarray.define(Rfunc.new('join', rstring, [rstring]))
   rarray.define(Rfunc.new('empty?', rboolean, []))
   rarray.define(Rfunc.new('map', rarray[[_U]], [], block_sig: FnSig.new(_U, [_T])))
+  rarray.define(Rfunc.new('select', rself, [], block_sig: FnSig.new(rboolean, [_T])))
   rarray.define(Rfunc.new('each', rarray[[_T]], [], block_sig: FnSig.new(_U, [_T])))
   rarray.define(Rfunc.new('==', rboolean, [rself]))
 

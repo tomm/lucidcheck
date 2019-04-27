@@ -1,10 +1,11 @@
 # Something you can assign to a variable
 class Rbindable
-  attr_accessor :name, :unsafe
+  attr_accessor :name, :unsafe, :silent
   #: fn(String | Symbol)
   def initialize(name)
     @name = name
     @unsafe = false
+    @silent = true
   end
 
   def new_inst

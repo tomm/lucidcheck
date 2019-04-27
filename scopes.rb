@@ -1,8 +1,10 @@
 # XXX need way to set types of abstract methods, and enforce in implementation
 class Scope
+  attr_accessor :silent  # don't report errors
   def initialize(selftype)
     @namespace = {}
     @selftype = selftype
+    @silent = false
   end
 
   def in_class
@@ -34,6 +36,7 @@ class WeakScope < Scope
   def initialize(parent_scope)
     super(parent_scope.in_class)
     @parent = parent_scope
+    @silent = parent_scope.silent
   end
 
   def lookup(name)
@@ -63,7 +66,7 @@ end
 class FnScope < Scope
   attr_reader :passed_block, :is_constructor, :caller_node, :return_vals
   #: fn(Rmetaclass | Rclass, Rblock | nil)
-  def initialize(caller_node, caller_scope, fn_body_node, in_class, parent_scope, passed_block, is_constructor: false)
+  def initialize(caller_node, caller_scope, fn_body_node, in_class, parent_scope, passed_block, silent, is_constructor: false)
     super(in_class)
     @parent_scope = parent_scope
     @passed_block = passed_block
@@ -72,6 +75,7 @@ class FnScope < Scope
     @caller_scope = caller_scope
     @fn_body_node = fn_body_node
     @return_vals = []
+    @silent = silent
   end
 
   def add_return_val(val)

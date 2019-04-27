@@ -12,10 +12,10 @@ if __FILE__ == $0
   end
 
   got_errors = false
-  ARGV.each do |filename|
+  ARGV.select { |a| a != '-a' }.each do |filename|
     source = File.open(filename).read
 
-    ctx = Context.new
+    ctx = Context.new(check_all: ARGV.include?('-a'))
     errors = ctx.check(filename, source)
     errors.uniq!
     if !errors.empty?

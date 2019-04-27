@@ -16,6 +16,10 @@ class Context
     @node_filename_map[node]
   end
 
+  def error(e)
+    @errors << e if !scope_top.silent
+  end
+
   def error_msg(e)
     filename = filename_of_node(e[0])
     "#{filename}:#{e[0]&.loc&.line}:#{e[0]&.loc&.column&.+ 1}: E: " +
@@ -97,7 +101,9 @@ class Context
       end
   end
 
-  def initialize
+  # check_all=false does not alter the overall type checking algorithm,
+  # it just suppresses error reporting in un-annotated code sections
+  def initialize(check_all: true)
     # '24' if RUBY_VERSION='2.4.4'
     #ruby_version = RUBY_VERSION.split('.').take(2).join
     #require "parser/ruby#{ruby_version}"
@@ -123,7 +129,7 @@ class Context
     @node_filename_map = {}
     #: Array<Scope>
     @scopestack = []
-    push_scope(FnScope.new(nil, nil, nil, @robject, nil, nil))
+    push_scope(FnScope.new(nil, nil, nil, @robject, nil, nil, !check_all))
 
     _check('core', File.open(__dir__ + '/headers/core.rb').read)
 
@@ -152,7 +158,7 @@ class Context
       ast = Parser::CurrentRuby.parse(source)
     rescue StandardError => e
       # XXX todo - get line number
-      @errors << [nil, :parse_error, e.to_s]
+      error [nil, :parse_error, e.to_s]
     else
       _build_node_filename_map(filename, ast)
       n_expr(ast)
@@ -219,7 +225,7 @@ class Context
     args.each { |a|
       t = n_expr(a)
       if !@rsymbol.supertype_of?(t)
-        @errors << [node, :general_type_error, @rsymbol.name, t.name]
+        error [node, :general_type_error, @rsymbol.name, t.name]
       else
         name = a.children[0].to_s
         handler.(a, name)
@@ -255,7 +261,7 @@ class Context
       index = args[0].children[0]
       type = rself.specialization[ rself.template_class.template_params[index] ]
       if type == nil
-        @errors << [args[0], :tuple_index, rself.name]
+        error [args[0], :tuple_index, rself.name]
         @rundefined
       else
         type
@@ -266,15 +272,15 @@ class Context
       index = args[0].children[0]
       val = n_expr(args[1])
       if !index.is_a?(Integer)
-        @errors << [args[0], :tuple_index, rself.name]
+        error [args[0], :tuple_index, rself.name]
         @rundefined
       else
         type = rself.specialization[ rself.template_class.template_params[index] ]
         if type == nil
-          @errors << [args[0], :tuple_index, rself.name]
+          error [args[0], :tuple_index, rself.name]
           @rundefined
         elsif !type.supertype_of?(val)
-          @errors << [args[1], :fn_arg_type, '[]=', "Integer,#{type.name}", "Integer,#{val.name}"]
+          error [args[1], :fn_arg_type, '[]=', "Integer,#{type.name}", "Integer,#{val.name}"]
           @rundefined
         else
           type
@@ -305,10 +311,10 @@ class Context
 
   def do_require(node, rself, args, relative: false)
     if relative == false
-      @errors << [args.first, :require_error, "Absolute require not implemented (yet ;)"]
+      error [args.first, :require_error, "Absolute require not implemented (yet ;)"]
       @rundefined
     elsif args[0].type != :str
-      @errors << [args.first, :require_error, "Require can only take a string literal"]
+      error [args.first, :require_error, "Require can only take a string literal"]
       @rundefined
     else
       path = args[0].children[0]
@@ -319,7 +325,7 @@ class Context
       begin
         source = File.open(path).read
       rescue => e
-        @errors << [args.first, :require_error, e.to_s]
+        error [args.first, :require_error, e.to_s]
         @rundefined
       else
         @required << path
@@ -347,7 +353,7 @@ class Context
         end
 
         if thing.type_unknown?
-          @errors << [thing.node, :fn_inference_fail, thing.name]
+          error [thing.node, :fn_inference_fail, thing.name]
         end
       elsif thing.kind_of?(Rmetaclass)
         check_function_type_inference_succeeded(thing.metaclass_for)
@@ -399,7 +405,7 @@ class Context
     when :gvar
       gvar = @robject.lookup(node.children[0].to_s)[0]
       if gvar == nil
-        @errors << [node, :gvar_unknown, node.children[0].to_s]
+        error [node, :gvar_unknown, node.children[0].to_s]
         @rundefined
       else
         gvar
@@ -407,7 +413,7 @@ class Context
     when :ivar
       ivar = scope_top.lookup(node.children[0].to_s)[0]
       if ivar == nil
-        @errors << [node, :ivar_unknown, node.children[0].to_s]
+        error [node, :ivar_unknown, node.children[0].to_s]
         @rundefined
       else
         ivar
@@ -415,7 +421,7 @@ class Context
     when :lvar
       lvar = scope_top.lookup(node.children[0].to_s)[0]
       if lvar == nil
-        @errors << [node, :lvar_unknown, node.children[0].to_s]
+        error [node, :lvar_unknown, node.children[0].to_s]
         @rundefined
       else
         lvar
@@ -488,7 +494,7 @@ class Context
     when :cbase
       @robject.metaclass
     else
-      @errors << [node, :checker_bug, "Lucidcheck Bug! This construct (#{node.type}) is not known"]
+      error [node, :checker_bug, "Lucidcheck Bug! This construct (#{node.type}) is not known"]
       puts "BUG! #{filename_of_node(node)}, line #{node.loc.line}: unknown AST node type #{node.type}:\r\n#{node}"
       @rundefined
     end
@@ -499,10 +505,10 @@ class Context
     rhs = read_rhs_type(node, node.children[1])
     raise "expected mlhs" if lhs_node.type != :mlhs
     if !rhs.is_specialization_of?(@rtuple)
-      @errors << [node, :masgn_rhs_type, rhs.name]
+      error [node, :masgn_rhs_type, rhs.name]
       @rundefined
     elsif lhs_node.children.length != rhs.specialization.length
-      @errors << [node, :masgn_length_mismatch, rhs.specialization.length, lhs_node.children.length]
+      error [node, :masgn_length_mismatch, rhs.specialization.length, lhs_node.children.length]
       @rundefined
     else
       for index in 0...(rhs.specialization.length) do
@@ -515,7 +521,7 @@ class Context
         when :ivasgn
           ivasgn(lhs_node.children[index], name, type)
         else 
-          @errors << [node, :checker_bug, "Unexpected in masgn: #{assign_type}"]
+          error [node, :checker_bug, "Unexpected in masgn: #{assign_type}"]
         end
       end
       rhs
@@ -537,7 +543,7 @@ class Context
       .map { |n|
         _case_type = n_expr(n.children[0])
         if _case_type != needle
-          @errors << [n.children[0], :match_type, needle.name, _case_type.name]
+          error [n.children[0], :match_type, needle.name, _case_type.name]
         end
         n_expr(n.children[1])
       }
@@ -552,7 +558,7 @@ class Context
     int = lookup_type(@robject, 'Integer')
 
     if _from != int || _to != int
-      @errors << [node, :fn_arg_type, 'range', 'Integer,Integer', "#{_from.name},#{_to.name}"]
+      error [node, :fn_arg_type, 'range', 'Integer,Integer', "#{_from.name},#{_to.name}"]
       @rundefined
     else
       @rrange[[int]]
@@ -565,7 +571,7 @@ class Context
       if type.is_a?(Rmetaclass)
         type.metaclass_for
       else
-        @errors << [n, :rescue_exception_type, type.name]
+        error [n, :rescue_exception_type, type.name]
         nil
       end
     }.compact
@@ -586,7 +592,7 @@ class Context
       elsif rbinding == nil
         scope_top.define_lvar(name, type)
       elsif rbinding != type
-        @errors << [node, :var_type, name, rbinding.name, type.name]
+        error [node, :var_type, name, rbinding.name, type.name]
       end
     end
     n_expr(node.children[2])
@@ -638,7 +644,7 @@ class Context
       body = n_expr(node.children[1])
 
       if cond != @rboolean
-        @errors << [node, :expected_boolean, cond.name]
+        error [node, :expected_boolean, cond.name]
       end
     }
     puts "Warning: n_while implementation incomplete"
@@ -652,7 +658,7 @@ class Context
       type2 = weak_scoped { n_expr(node.children[2]) }
 
       if cond != @rboolean
-        @errors << [node, :expected_boolean, cond.name]
+        error [node, :expected_boolean, cond.name]
       end
 
       sum_of_types([type1, type2])
@@ -669,18 +675,18 @@ class Context
 
   def block_call(node, block, passed_args, mut_template_types)
     if block == nil
-      @errors << [scope_top.caller_node || node, :no_block_given]
+      error [scope_top.caller_node || node, :no_block_given]
       @rundefined
     else
       type_errors = block.sig.call_typecheck?(scope_top.caller_node || node, '<block>', passed_args, {}, mut_template_types, nil, scope_top.in_class)
 
       if !type_errors.empty?
-        @errors.concat(type_errors)
+        type_errors.each { |e| error e }
         return @rundefined
       end
 
       if !block.definition_only
-        function_scope = FnScope.new(node, scope_top, block.body_node, scope_top.in_class, block.fn_scope, nil)
+        function_scope = FnScope.new(node, scope_top, block.body_node, scope_top.in_class, block.fn_scope, nil, scope_top.silent)
         # define lvars from arguments
         block.sig.args.each { |a| function_scope.define_lvar(a[0], a[1]) }
 
@@ -722,7 +728,7 @@ class Context
       if contents.map {|v| v == fst_type }.all?
         @rhash[fst_type]
       else
-        @errors << [node, :hash_mixed_types]
+        error [node, :hash_mixed_types]
         @rundefined
       end
     end
@@ -741,7 +747,7 @@ class Context
         @rtuple[contents]
       else
         # XXX bad error messsage. maybe something about tuple length
-        @errors << [node, :tuple_too_big]
+        error [node, :tuple_too_big]
         @rundefined
       end
     end
@@ -754,7 +760,7 @@ class Context
 
     scope_top.in_class.define(new_module)
 
-    push_scope(FnScope.new(node, nil, nil, new_module, nil, nil, is_constructor: false))
+    push_scope(FnScope.new(node, nil, nil, new_module, nil, nil, scope_top.silent, is_constructor: false))
     r = n_expr(node.children[1])
     pop_scope()
 
@@ -773,7 +779,7 @@ class Context
 
     scope_top.in_class.define(new_class.metaclass, bind_to: class_name)
 
-    push_scope(FnScope.new(node, nil, nil, new_class, nil, nil, is_constructor: false))
+    push_scope(FnScope.new(node, nil, nil, new_class, nil, nil, scope_top.silent, is_constructor: false))
     r = n_expr(node.children[2])
 
     # define a 'new' static method if 'initialize' was not defined
@@ -790,7 +796,7 @@ class Context
     type = scope.lookup(type_identifier)[0]
     if type == nil then
       # type not found
-      @errors << [node, :type_unknown, type_identifier]
+      error [node, :type_unknown, type_identifier]
       @rundefined
     else
       type.metaclass_for
@@ -809,12 +815,12 @@ class Context
       # error already reported. do nothing
     elsif scope_top.lookup(name)[0] == nil
       if scope_top.is_constructor == false
-        @errors << [node, :ivar_assign_outside_constructor, name]
+        error [node, :ivar_assign_outside_constructor, name]
       else
         scope_top.define_ivar(name, type)
       end
     elsif !scope_top.lookup(name)[0].supertype_of?(type)
-      @errors << [node, :var_type, name, scope_top.lookup(name)[0].name, type.name]
+      error [node, :var_type, name, scope_top.lookup(name)[0].name, type.name]
     else
       # binding already existed. types match. cool
     end
@@ -836,7 +842,7 @@ class Context
           # they are specializations of the same class, but 'type'
           # is not specialized yet. take specialization from annotation. 
         elsif !annot_type.supertype_of?(type)
-          @errors << [annotation_node, :annotation_mismatch, annot_type.name, type.name]
+          error [annotation_node, :annotation_mismatch, annot_type.name, type.name]
         end
         annot_type
       else
@@ -859,7 +865,7 @@ class Context
     elsif rbinding == nil
       scope_top.define_lvar(name, type)
     elsif !rbinding.supertype_of?(type)
-      @errors << [node, :var_type, name, rbinding.name, type.name]
+      error [node, :var_type, name, rbinding.name, type.name]
     end
 
     type
@@ -874,7 +880,7 @@ class Context
     elsif scope_top.lookup(name)[0] == nil
       scope_top.define_ivar(name, type)
     else
-      @errors << [node, :const_redef, name]
+      error [node, :const_redef, name]
     end
 
     type
@@ -891,14 +897,14 @@ class Context
     elsif scope.is_a?(Rmodule)
       # good
     else
-      @errors << [node, :general_type_error, 'Class / Module', scope&.name]
+      error [node, :general_type_error, 'Class / Module', scope&.name]
       return @rundefined
     end
     c = scope.lookup(name)[0]
     if c != nil
       c
     else
-      @errors << [node, :const_unknown, name, scope.name]
+      error [node, :const_unknown, name, scope.name]
       @rundefined
     end
   end
@@ -931,7 +937,7 @@ class Context
       if type_scope.is_a?(Rsumtype) && type_scope.is_optional
         type_scope = type_scope.to_non_optional
       else
-        @errors << [node, :invalid_safe_send, type_scope.name]
+        error [node, :invalid_safe_send, type_scope.name]
         return @rundefined
       end
     end
@@ -942,14 +948,14 @@ class Context
     if fn.is_a?(Rlazydeffunc) then fn = define_lazydeffunc(fn) end
 
     if fn == nil
-      @errors << [node, :fn_unknown, name, type_scope.name]
+      error [node, :fn_unknown, name, type_scope.name]
       @rundefined
     elsif fn.kind_of?(Rbuiltin)
       errs = fn.sig.nil? ? [] : fn.sig.call_typecheck?(node, fn.name, arg_types, {}, {}, nil, type_scope)
       if errs.empty?
         fn.call(node, type_scope, arg_nodes)
       else
-        @errors.concat(errs)
+        errs.each { |e| error e }
         @rundefined
       end
     elsif fn.kind_of?(Rfunc)
@@ -961,7 +967,7 @@ class Context
         ret
       end
     else
-      @errors << [node, :not_a_function, name]
+      error [node, :not_a_function, name]
       @rundefined
     end
   end
@@ -984,17 +990,17 @@ class Context
     type_errors = fn.sig.call_typecheck?(node, fn.name, args, kwargs, template_types, block, type_scope)
 
     if !type_errors.empty?
-      @errors.concat(type_errors)
+      type_errors.each { |e| error e }
       return @rundefined
     elsif fn.block_sig && block.nil?
-      @errors << [scope_top.caller_node || node, :no_block_given]
+      error [scope_top.caller_node || node, :no_block_given]
       return @rundefined
     elsif fn.block_sig && block.sig.args.length != fn.block_sig.args.length
-      @errors << [scope_top.caller_node || node, :block_arg_num, fn.name, fn.block_sig.args.length, block.sig.args.length]
+      error [scope_top.caller_node || node, :block_arg_num, fn.name, fn.block_sig.args.length, block.sig.args.length]
       return @rundefined
     elsif fn.body != nil
       # function definition with function body code
-      function_scope = FnScope.new(node, scope_top, fn.body, call_scope, nil, block, is_constructor: fn.is_constructor)
+      function_scope = FnScope.new(node, scope_top, fn.body, call_scope, nil, block, scope_top.silent && fn.silent, is_constructor: fn.is_constructor)
       # define lvars from normal arguments
       fn.sig.args.each { |a|
         function_scope.define_lvar(
@@ -1027,7 +1033,7 @@ class Context
           if fn.return_type == nil
             fn.return_type = ret
           elsif !fn.return_type.supertype_of?(ret) && !fn.return_type.is_a?(Rundefined)
-            @errors << [node, :fn_return_type, fn.name, fn.return_type.name, ret.name]
+            error [node, :fn_return_type, fn.name, fn.return_type.name, ret.name]
           end
         end
         pop_scope()
@@ -1036,7 +1042,7 @@ class Context
       if block
         if fn.block_sig && !fn.block_sig.structural_eql?(block.sig, template_types)
           # block type mismatch
-          @errors << [scope_top.caller_node || node, :block_arg_type, fn.name, fn.block_sig.sig_to_s(template_types), block.sig.sig_to_s(template_types)]
+          error [scope_top.caller_node || node, :block_arg_type, fn.name, fn.block_sig.sig_to_s(template_types), block.sig.sig_to_s(template_types)]
         else
           fn.block_sig = block.sig
         end
@@ -1059,7 +1065,7 @@ class Context
           template_types[expected_ret] = block_ret
         elsif expected_ret != block_ret
           # block return type mismatch
-          @errors << [node, :block_arg_type, fn.name, fn.block_sig.sig_to_s(template_types), block.sig.sig_to_s(template_types)]
+          error [node, :block_arg_type, fn.name, fn.block_sig.sig_to_s(template_types), block.sig.sig_to_s(template_types)]
         end
       end
     end
@@ -1091,8 +1097,8 @@ class Context
 
   def get_annotation_for_node(node)
     if (annot = @annotations[filename_of_node(node)][node.loc.line-1])
-      type, error = AnnotationParser.new(annot, scope_top.method(:lookup)).get_type
-      @errors << [node, :annotation_error, error] unless error == nil
+      type, e = AnnotationParser.new(annot, scope_top.method(:lookup)).get_type
+      error [node, :annotation_error, e] unless e == nil
       type
     else
       nil
@@ -1114,7 +1120,7 @@ class Context
     unknown_args = all_args.map(&:type).select { |t| ![:arg, :optarg, :kwoptarg].include?(t) }
 
     if unknown_args.length > 0
-      @errors << [args_node, :checker_bug, "Unknown argument types: #{unknown_args.join(', ')}"]
+      error [args_node, :checker_bug, "Unknown argument types: #{unknown_args.join(', ')}"]
     end
 
     [arg_name_type, optarg_name_type, kwarg_name_type]
@@ -1128,11 +1134,13 @@ class Context
     if annot_type
       fn = annot_type
       fn.name = name
+      # annotated functions show errors :)
+      fn.silent = false
       # XXX update for kwarg nums!! XXX
       if arg_name_type.length != annot_type.sig.args.length
-        @errors << [node, :annotation_error, "Number of arguments (#{arg_name_type.length}) does not match annotation (#{annot_type.sig.args.length})"]
+        error [node, :annotation_error, "Number of arguments (#{arg_name_type.length}) does not match annotation (#{annot_type.sig.args.length})"]
       elsif optarg_name_type.length != annot_type.sig.optargs.length
-        @errors << [node, :annotation_error, "Number of optional arguments (#{optarg_name_type.length}) does not match annotation (#{annot_type.sig.optargs.length})"]
+        error [node, :annotation_error, "Number of optional arguments (#{optarg_name_type.length}) does not match annotation (#{annot_type.sig.optargs.length})"]
       else
         fn.sig.name_anon_args(arg_name_type.map { |nt| nt[0] })
         fn.sig.name_optargs(optarg_name_type.map { |nt| nt[0] })
@@ -1157,7 +1165,7 @@ class Context
   def try_deffun(node, class_or_module, fn)
     existing_fn, existing_class = class_or_module.lookup(fn.name)
     if existing_fn != nil && existing_class.equal?(class_or_module)
-      @errors << [node, :fn_redef, fn.name]
+      error [node, :fn_redef, fn.name]
     else
       class_or_module.define(fn)
     end
@@ -1205,7 +1213,7 @@ class Context
     if parent_fn.nil? || fn.sig.structural_eql?(parent_fn.sig)
       true
     else
-      @errors << [fn.node, :unmatched_override, fn.name, parent_fn.sig.sig_to_s({}), fn.sig.sig_to_s({})]
+      error [fn.node, :unmatched_override, fn.name, parent_fn.sig.sig_to_s({}), fn.sig.sig_to_s({})]
       false
     end
   end
@@ -1242,7 +1250,7 @@ class Context
   def call_by_definition_types(node, rclass, fn)
     type_scope = rclass
     call_scope = rclass
-    fn_scope = [FnScope.new(nil, nil, nil, @robject, nil, nil)]
+    fn_scope = [FnScope.new(nil, nil, nil, @robject, nil, nil, scope_top.silent)]
     arg_types = fn.sig.args.map { |a| a[1] }
     block = Rblock.new([], nil, fn_scope, definition_only: true)
     block.sig = fn.block_sig
