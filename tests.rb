@@ -706,7 +706,7 @@ class TestLucidCheck < Test::Unit::TestCase
     assert_equal(
       [[13, :fn_return_type, 'b', 'Float', 'Integer'],
        [15, :fn_return_type, 'd', 'Nil', 'Integer'],
-       [22, :fn_return_type, 'a', 'Integer', 'Float'],
+       [22, :fn_return_type, 'f', 'Integer', 'Float'],
        [30, :fn_return_type, "do_thing", "Integer", "Float"],
        [30, :block_arg_type, "do_thing", "(Integer) > Integer", "(Integer) > Float"]],
       parse_str(
@@ -730,9 +730,9 @@ class TestLucidCheck < Test::Unit::TestCase
 
           class A
             #: fn(Float) -> Integer
-            def self.a(x); x end
+            def self.f(x); x end
           end
-          A.a(1.0)
+          A.f(1.0)
 
           #: fn(Integer, &(Integer) -> Integer) -> Integer
           def do_thing(x)
@@ -1384,6 +1384,42 @@ class TestLucidCheck < Test::Unit::TestCase
           x = []
           f(x)
           x = nil  # fails
+        RUBY
+      )
+    )
+  end
+
+  def test_validate_override
+    assert_equal(
+      [[8, :fn_redef, 'test'],
+       [22, :unmatched_override, 'test2', '() > Nil', '(?Integer) > Nil'],
+       [19, :unmatched_override, 'test', '() > Nil', '(?Integer) > Nil']],
+      parse_str(
+        <<-RUBY
+          class A
+            def initialize
+            end
+
+            def test
+            end
+
+            def test  # fail
+            end
+
+            def self.test2
+            end
+          end
+
+          class B < A
+            def initialize(x=0)
+            end
+
+            def test(x=0)  # fail
+            end
+
+            def self.test2(x=0)  # fail
+            end
+          end
         RUBY
       )
     )

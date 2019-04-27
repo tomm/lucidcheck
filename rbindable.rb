@@ -88,12 +88,17 @@ class SelfType < Rbindable
 end
 
 class Rlazydeffunc < Rbindable
-  attr_reader :node, :scope
+  attr_reader :class_or_module
 
-  def initialize(name, node, scope)
+  def initialize(name, node, class_or_module, lambda_make)
     super(name)
+    @lambda_make = lambda_make
     @node = node
-    @scope = scope
+    @class_or_module = class_or_module
+  end
+
+  def build
+    @lambda_make.(@node, @class_or_module)
   end
 end
 
@@ -148,6 +153,10 @@ class Rmetaclass < Rbindable
     super("#{parent_name}:Class")
     @scope = Scope.new(self)
     @metaclass_for = metaclass_for
+  end
+
+  def parent
+    @metaclass_for.parent&.metaclass
   end
 
   #: fn(String) -> Tuple<Rbindable | Nil, Rbindable | Nil>

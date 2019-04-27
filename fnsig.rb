@@ -58,7 +58,13 @@ class FnSig
     args_match = other_sig.args.map { |v|
         template_types[v[1]] || v[1]
     } == @args.map{|v|v[1]}
-    return (ret == other_sig.return_type) && args_match
+    optargs_match = other_sig.optargs.map { |v|
+        template_types[v[1]] || v[1]
+    } == @optargs.map{|v|v[1]}
+    kwargs_match = other_sig.kwargs.map { |kv|
+      [kv[0], template_types[kv[1]] || kv[1]]
+    }.to_h == @kwargs
+    return (ret == other_sig.return_type) && args_match && optargs_match && kwargs_match
   end
 
   ##: fn(Array[Rbindable]) > Array[error]

@@ -88,6 +88,10 @@ class Context
         "Unexpected keyword arguments: #{e[2].join(', ')}"
       when :fn_kwarg_type
         "Keyword argument '#{e[2]}' expected type '#{e[3]}' but found '#{e[4]}'"
+      when :unmatched_override
+        "Can not override method '#{e[2]}' of type '#{e[3]}' with '#{e[4]}'"
+      when :fn_redef
+        "Can not redefine method '#{e[2]}'"
       else
         e.to_s
       end
@@ -355,6 +359,9 @@ class Context
         process.(scope.metaclass, constructor)
       end
     end
+    scope.metaclass.scope.each_value { |bindable|
+      process.(scope.metaclass, bindable)
+    }
     scope.scope.each_value { |bindable|
       process.(scope, bindable)
     }
@@ -1108,7 +1115,7 @@ class Context
   end
 
   #: fn(Parser::AST::Node, String, Parser::AST::Node, Parser::AST::Node, Rclass) -> Rfunc
-  def make_method(node, name, args_node, fn_body, on_class)
+  def make_method(node, name, args_node, fn_body)
     arg_name_type, optarg_name_type, kwarg_name_type = parse_function_args_def(args_node)
     annot_type = get_annotation_for_node(node)
 
@@ -1141,41 +1148,73 @@ class Context
     fn
   end
 
+  def try_deffun(node, class_or_module, fn)
+    existing_fn, existing_class = class_or_module.lookup(fn.name)
+    if existing_fn != nil && existing_class.equal?(class_or_module)
+      @errors << [node, :fn_redef, fn.name]
+    else
+      class_or_module.define(fn)
+    end
+  end
+
   def n_def(node)
     name = node.children[0].to_s
 
     if name == 'initialize'
-      scope_top.in_class.metaclass.define(
-        Rlazydeffunc.new('new', node, scope_top)
+      try_deffun(node, scope_top.in_class.metaclass,
+        Rlazydeffunc.new('new', node, scope_top.in_class.metaclass, ->(node, scope) {
+          fn = make_method(node, 'new', node.children[1], node.children[2])
+          fn.is_constructor = true
+          if fn.sig.no_args?
+            fn.can_autocheck = true
+          end
+          # XXX note that return type of possible annotation is ignored
+          fn.return_type = scope.metaclass_for
+          fn
+        })
       )
     else
-      scope_top.in_class.define(
-        Rlazydeffunc.new(name, node, scope_top)
+      try_deffun(
+        node,
+        scope_top.in_class,
+        Rlazydeffunc.new(name, node, scope_top.in_class, ->(node, scope) {
+          make_method(node, name, node.children[1], node.children[2])
+        })
       )
+      #end
+    end
+  end
+  
+  def try_override(_class, fn)
+    return true if fn.name == 'new'
+    return true if _class.is_a?(Rmodule)
+    return true if _class.parent.nil?
+
+    parent_fn, parent_scope = _class.parent.lookup(fn.name)
+
+    if parent_fn.is_a?(Rlazydeffunc)
+      parent_fn = define_lazydeffunc(parent_fn)
+    end
+
+    if parent_fn.nil? || fn.sig.structural_eql?(parent_fn.sig)
+      true
+    else
+      @errors << [fn.node, :unmatched_override, fn.name, parent_fn.sig.sig_to_s({}), fn.sig.sig_to_s({})]
+      false
     end
   end
 
   #: fn(Rlazydeffunc) -> Rfunc
   def define_lazydeffunc(lazydef)
     name = lazydef.name
-    node = lazydef.node
-    scope = lazydef.scope
-    
-    if name == 'new'
-      fn = make_method(node, 'new', node.children[1], node.children[2], scope.in_class)
-      fn.is_constructor = true
-      if fn.sig.no_args?
-        fn.can_autocheck = true
-      end
-      # XXX note that return type of possible annotation is ignored
-      fn.return_type = scope.in_class
-      scope.in_class.metaclass.define(fn)
-      fn
-    else
-      fn = make_method(node, name, node.children[1], node.children[2], scope.in_class)
-      scope.in_class.define(fn)
-      fn
+    class_or_module = lazydef.class_or_module
+    fn = lazydef.build()
+
+    if try_override(class_or_module, fn)
+      class_or_module.define(fn)
     end
+
+    fn
   end
 
   # define static method
@@ -1184,8 +1223,13 @@ class Context
       raise "Checker bug. Expected self at #{node}"
     end
     name = node.children[1].to_s
-    fn = make_method(node, name, node.children[2], node.children[3], scope_top.in_class.metaclass)
-    scope_top.in_class.metaclass.define(fn)
+    try_deffun(
+      node,
+      scope_top.in_class.metaclass,
+      Rlazydeffunc.new(name, node, scope_top.in_class.metaclass, ->(node, scope) {
+        make_method(node, name, node.children[2], node.children[3])
+      })
+    )
   end
 
   # type check based on annotated types, rather than types passed in code
