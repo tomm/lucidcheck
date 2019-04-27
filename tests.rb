@@ -661,7 +661,7 @@ class TestLucidCheck < Test::Unit::TestCase
   def test_recursion
     assert_equal(
       [[7, :fn_arg_type, '*', 'Integer', 'unannotated_recursive_function'],
-       [11, :fn_return_type, 'factorial_bad', :unannotated_recursive_function, 'Integer']],
+       [11, :fn_return_type, 'factorial_bad', :unannotated_recursive_function, 'Integer | undefined']],
       parse_str(
         <<-RUBY
           #: fn(Integer) -> Integer
@@ -1231,13 +1231,13 @@ class TestLucidCheck < Test::Unit::TestCase
        [7, :fn_arg_type, '==', 'Integer', 'Nil'],
        [5, :fn_unknown, "d", "Object"],
        [7, :fn_arg_type, "==", "Integer", "Nil"],
-       [11, :fn_kwarg_type, "b", "Integer", "Float"],
+       [12, :fn_kwarg_type, "b", "Integer", "Float"],
        [5, :fn_unknown, "d", "Object"],
        [7, :fn_arg_type, "==", "Integer", "Integer | Nil"],
-       [13, :fn_kwarg_type, "c", "Integer | Nil", "Float"],
+       [14, :fn_kwarg_type, "c", "Integer | Nil", "Float"],
        [5, :fn_unknown, "d", "Object"],
        [7, :fn_arg_type, "==", "Integer", "Integer | Nil"],
-       [15, :fn_kwargs_unexpected, "d"]],
+       [16, :fn_kwargs_unexpected, "d"]],
       parse_str(
         <<-RUBY
           def f(a, b: 2, c: nil)
@@ -1247,6 +1247,7 @@ class TestLucidCheck < Test::Unit::TestCase
             d  # fails
             a == b
             a == c  # fails
+            nil
           end
           f(1)
           f(1, b: 3)

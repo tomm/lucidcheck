@@ -641,6 +641,7 @@ class Context
         @errors << [node, :expected_boolean, cond.name]
       end
     }
+    puts "Warning: n_while implementation incomplete"
     @rundefined
   end
 
@@ -984,10 +985,13 @@ class Context
 
     if !type_errors.empty?
       @errors.concat(type_errors)
+      return @rundefined
     elsif fn.block_sig && block.nil?
       @errors << [scope_top.caller_node || node, :no_block_given]
+      return @rundefined
     elsif fn.block_sig && block.sig.args.length != fn.block_sig.args.length
       @errors << [scope_top.caller_node || node, :block_arg_num, fn.name, fn.block_sig.args.length, block.sig.args.length]
+      return @rundefined
     elsif fn.body != nil
       # function definition with function body code
       function_scope = FnScope.new(node, scope_top, fn.body, call_scope, nil, block, is_constructor: fn.is_constructor)
@@ -1060,9 +1064,11 @@ class Context
       end
     end
 
+    raise "wtf (#{fn.name})" if fn.return_type == nil
+
     # fn.return_type can be nil if type inference has not happened yet
     # XXX but how can that still be the case here?
-    to_concrete_type(fn.return_type || @rundefined, type_scope, template_types)
+    to_concrete_type(fn.return_type, type_scope, template_types)
   end
 
   def to_concrete_type(type, self_type, template_types)
