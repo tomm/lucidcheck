@@ -11,12 +11,12 @@ class Scope
     @selftype
   end
 
-  #: fn(String) -> Tuple<Rbindable, Rbindable>
+  ##: fn(String) -> Tuple<Rbindable, Rbindable>
   def lookup(name)
     [@namespace[name], @selftype]
   end
 
-  #: fn(Rbindable, ?String)
+  ##: fn(Rbindable, ?String)
   def define(rbindable, bind_to=nil)
     @namespace[bind_to || rbindable.name] = rbindable
   end
@@ -65,7 +65,7 @@ end
 
 class FnScope < Scope
   attr_reader :passed_block, :is_constructor, :caller_node, :return_vals
-  #: fn(Rmetaclass | Rclass, Rblock | nil)
+  ##: fn(Rmetaclass | Rclass, Rblock | nil)
   def initialize(caller_node, caller_scope, fn_body_node, in_class, parent_scope, passed_block, silent, is_constructor: false)
     super(in_class)
     @parent_scope = parent_scope
@@ -95,7 +95,7 @@ class FnScope < Scope
     end
   end
 
-  #: fn(String) > [Rbindable, Rbindable]
+  ##: fn(String) > [Rbindable, Rbindable]
   # returns       [object, scope]
   def lookup(name)
     r = super(name)

@@ -43,7 +43,7 @@ class AnnotationParser
     tokens
   end
 
-  #: fn() -> Tuple<Rbindable, String | Nil>
+  ##: fn() -> Tuple<Rbindable, String | Nil>
   def get_type
     unsafe = has 'unsafe'
     if unsafe then eat end

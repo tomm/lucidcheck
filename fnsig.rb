@@ -15,23 +15,23 @@ class FnSig
     @args.empty? && @optargs.empty? && @kwargs.empty?
   end
 
-  #: fn(Array<Rbindable>)
+  ##: fn(Array<Rbindable>)
   def add_anon_args(args)
     args.each { |a| @args << [nil, a] }
   end
 
-  #: fn(Hash<String, Rbindable>)
+  ##: fn(Hash<String, Rbindable>)
   def set_kwargs(kwargs)
     @kwargs = kwargs
   end
 
-  #: fn(Array<Tuple<String, Rbindable>>)
+  ##: fn(Array<Tuple<String, Rbindable>>)
   def add_opt_args(args)
     @optargs.concat(args)
   end
 
   # named as in def my_func(x, y, z). ie not keyword args
-  #: fn(Array<Tuple<String, Rbindable>>)
+  ##: fn(Array<Tuple<String, Rbindable>>)
   def add_named_args(args)
     @args.concat(args)
   end
@@ -52,7 +52,7 @@ class FnSig
     @args.map{ |a| template_types[a[1]] || a[1] }
   end
 
-  #: fn(FnSig, Hash<TemplateType, Rbindable>)
+  ##: fn(FnSig, Hash<TemplateType, Rbindable>)
   def structural_eql?(other_sig, template_types = {})
     ret = template_types[@return_type] || @return_type
     args_match = other_sig.args.map { |v|

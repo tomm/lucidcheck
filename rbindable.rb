@@ -1,7 +1,7 @@
 # Something you can assign to a variable
 class Rbindable
   attr_accessor :name, :unsafe, :silent
-  #: fn(String | Symbol)
+  ##: fn(String | Symbol)
   def initialize(name)
     @name = name
     @unsafe = false
@@ -61,7 +61,7 @@ class Rrecursion < Rbindable
     super(:unannotated_recursive_function)
   end
 
-  #: fn(String) -> Tuple<Rbindable | Nil, Rbindable | Nil>
+  ##: fn(String) -> Tuple<Rbindable | Nil, Rbindable | Nil>
   def lookup(name)
     [nil, self]
   end
@@ -72,7 +72,7 @@ class TemplateType < Rbindable
     super(:generic)
   end
 
-  #: fn(String) -> Tuple<Rbindable | Nil, Rbindable | Nil>
+  ##: fn(String) -> Tuple<Rbindable | Nil, Rbindable | Nil>
   def lookup(name)
     [nil, self]
   end
@@ -106,7 +106,7 @@ end
 class Rfunc < Rbindable
   attr_accessor :node, :body, :sig, :block_sig, :checked, :can_autocheck, :is_constructor
 
-  #: fn(String, Rbindable, ?Array<Rbindable>, is_constructor: Boolean, block_sig: FnSig, checked: Boolean, can_autocheck: Boolean)
+  ##: fn(String, Rbindable, ?Array<Rbindable>, is_constructor: Boolean, block_sig: FnSig, checked: Boolean, can_autocheck: Boolean)
   def initialize(name, return_type, anon_args = [], is_constructor: false, block_sig: nil, checked: true, can_autocheck: false)
     super(name)
     @sig = FnSig.new(return_type, anon_args)
@@ -122,17 +122,17 @@ class Rfunc < Rbindable
   end
 
   # named as in def my_func(x, y, z). ie not keyword args
-  #: fn(Array<Tuple<String, Rbindable>>)
+  ##: fn(Array<Tuple<String, Rbindable>>)
   def add_named_args(arg_name_type)
     @sig.add_named_args(arg_name_type)
   end
 
-  #: fn(Hash<String, Rbindable>)
+  ##: fn(Hash<String, Rbindable>)
   def set_kwargs(kwargs)
     @sig.set_kwargs(kwargs)
   end
 
-  #: fn(Array<Tuple<String, Rbindable>>)
+  ##: fn(Array<Tuple<String, Rbindable>>)
   def add_opt_args(arg_name_type)
     @sig.add_opt_args(arg_name_type)
   end
@@ -149,7 +149,7 @@ end
 class Rmetaclass < Rbindable
   attr_reader :metaclass_for, :scope
 
-  #: fn(String, Rclass)
+  ##: fn(String, Rclass)
   def initialize(parent_name, metaclass_for)
     super("#{parent_name}:Class")
     @scope = Scope.new(self)
@@ -160,7 +160,7 @@ class Rmetaclass < Rbindable
     @metaclass_for.parent&.metaclass
   end
 
-  #: fn(String) -> Tuple<Rbindable | Nil, Rbindable | Nil>
+  ##: fn(String) -> Tuple<Rbindable | Nil, Rbindable | Nil>
   def lookup(method_name)
     @scope.lookup(method_name)
   end
@@ -184,7 +184,7 @@ class Rmodule < Rbindable
     super(name)
   end
 
-  #: fn(String) -> Tuple<Rbindable | Nil, Rbindable | Nil>
+  ##: fn(String) -> Tuple<Rbindable | Nil, Rbindable | Nil>
   def lookup(method_name)
     @scope.lookup(method_name)
   end
@@ -196,7 +196,7 @@ end
 
 class Rclass < Rbindable
   attr_reader :metaclass, :scope, :parent, :template_params, :can_underspecialize
-  #: fn(String, Rclass | Nil, ?Array<TemplateType>, can_underspecialize: Boolean)
+  ##: fn(String, Rclass | Nil, ?Array<TemplateType>, can_underspecialize: Boolean)
   def initialize(name, parent_class, template_params=[], can_underspecialize: false)
     @metaclass = Rmetaclass.new(name, self)
     super(name)
@@ -225,7 +225,7 @@ class Rclass < Rbindable
   def add_template_params_scope(mut_template_types)
   end
 
-  #: fn(String) -> Tuple<Rbindable | Nil, Rbindable | Nil>
+  ##: fn(String) -> Tuple<Rbindable | Nil, Rbindable | Nil>
   def lookup(name)
     m = @scope.lookup(name)
     if m[0].nil? && @parent
@@ -235,7 +235,7 @@ class Rclass < Rbindable
     end
   end
 
-  #: fn(Rbindable, bind_to: String | Nil)
+  ##: fn(Rbindable, bind_to: String | Nil)
   def define(rbindable, bind_to: nil)
     if rbindable.is_a?(Rmetaclass)
       @scope.define(rbindable, bind_to || rbindable.metaclass_for.name)
@@ -244,7 +244,7 @@ class Rclass < Rbindable
     end
   end
 
-  #: fn(String, Rclass, ?Array<TemplateType>, can_underspecialize: Boolean) -> Rclass
+  ##: fn(String, Rclass, ?Array<TemplateType>, can_underspecialize: Boolean) -> Rclass
   def classdef(name, parent_class, template_params=[], can_underspecialize: false)
     c = Rclass.new(name, parent_class, template_params, can_underspecialize: can_underspecialize)
     @scope.define(c.metaclass, name)
@@ -253,7 +253,7 @@ class Rclass < Rbindable
 
   # permits under-specialization. this is needed for tuples, which have
   # have 8 generic params (max tuple length 8) but n-tuple only uses n
-  #: fn(Array<Rbindable>) -> Rconcreteclass
+  ##: fn(Array<Rbindable>) -> Rconcreteclass
   def [](specialization)
     Rconcreteclass.new(
       self, 
@@ -270,7 +270,7 @@ end
 
 class Rconcreteclass < Rbindable
   attr_reader :template_class, :specialization
-  #: fn(Rclass, Hash<TemplateType, Rbindable>)
+  ##: fn(Rclass, Hash<TemplateType, Rbindable>)
   def initialize(_template_class, specialization)
     @specialization = specialization
     @template_class = _template_class
@@ -300,12 +300,12 @@ class Rconcreteclass < Rbindable
     @template_class.type
   end
 
-  #: fn(String) -> Tuple<Rbindable | Nil, Rbindable | Nil>
+  ##: fn(String) -> Tuple<Rbindable | Nil, Rbindable | Nil>
   def lookup(name)
     @template_class.lookup(name)
   end
 
-  #: fn(Rbindable)
+  ##: fn(Rbindable)
   def define(rbindable)
     @template_class.define(rbindable)
   end
@@ -354,7 +354,7 @@ end
 
 class Rsumtype < Rbindable
   attr_reader :options
-  #: fn(Array<Rbindable>)
+  ##: fn(Array<Rbindable>)
   def initialize(types)
     super(nil)
     @options = types.sort_by { |a| a.name.to_s }
@@ -371,7 +371,7 @@ class Rsumtype < Rbindable
     end
   end
 
-  #: fn(String) -> Tuple<Rbindable | Nil, Rbindable | Nil>
+  ##: fn(String) -> Tuple<Rbindable | Nil, Rbindable | Nil>
   def lookup(name)
     @base_type&.lookup(name) || [nil, nil]
   end

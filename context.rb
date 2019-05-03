@@ -103,6 +103,7 @@ class Context
 
   # check_all=false does not alter the overall type checking algorithm,
   # it just suppresses error reporting in un-annotated code sections
+  #: fn(check_all: Boolean)
   def initialize(check_all: true)
     # '24' if RUBY_VERSION='2.4.4'
     #ruby_version = RUBY_VERSION.split('.').take(2).join
@@ -127,7 +128,7 @@ class Context
     @annotations = {}
     @required = []
     @node_filename_map = {}
-    #: Array<Scope>
+    ##: Array<Scope>
     @scopestack = []
     push_scope(FnScope.new(nil, nil, nil, @robject, nil, nil, !check_all))
 
@@ -165,7 +166,7 @@ class Context
     end
   end
 
-  #: fn(Parser::AST::Node, String)
+  ##: fn(Parser::AST::Node, String)
   def define_attr_reader(node, scope, name)
     # don't know what ivars are declared yet, so generate 'code'
     fn = Rfunc.new(name, nil, [], checked: false)
@@ -185,7 +186,7 @@ class Context
     scope.define(fn)
   end
 
-  #: fn(Parser::AST::Node, String)
+  ##: fn(Parser::AST::Node, String)
   def define_attr_writer(node, scope, name)
     # don't know what ivars are declared yet, so generate 'code'
     fn = Rfunc.new(name + "=", nil, checked: false)
@@ -357,6 +358,8 @@ class Context
         end
       elsif thing.kind_of?(Rmetaclass)
         check_function_type_inference_succeeded(thing.metaclass_for)
+      elsif thing.kind_of?(Rmodule)
+        check_function_type_inference_succeeded(thing)
       end
     }
     if scope.is_a?(Rclass)
@@ -385,7 +388,7 @@ class Context
     @scopestack.push(fnscope)
   end
 
-  #: returns type
+  ##: returns type
   def n_expr(node)
     case node&.type
     when nil
@@ -629,7 +632,7 @@ class Context
     end
   end
 
-  #: fn(&fn() -> Rbindable)
+  ##: fn(&fn() -> Rbindable)
   def weak_scoped
     push_scope(WeakScope.new(scope_top))
     v = yield
@@ -1126,7 +1129,7 @@ class Context
     [arg_name_type, optarg_name_type, kwarg_name_type]
   end
 
-  #: fn(Parser::AST::Node, String, Parser::AST::Node, Parser::AST::Node, Rclass) -> Rfunc
+  ##: fn(Parser::AST::Node, String, Parser::AST::Node, Parser::AST::Node, Rclass) -> Rfunc
   def make_method(node, name, args_node, fn_body)
     arg_name_type, optarg_name_type, kwarg_name_type = parse_function_args_def(args_node)
     annot_type = get_annotation_for_node(node)
@@ -1218,7 +1221,7 @@ class Context
     end
   end
 
-  #: fn(Rlazydeffunc) -> Rfunc
+  ##: fn(Rlazydeffunc) -> Rfunc
   def define_lazydeffunc(lazydef)
     name = lazydef.name
     class_or_module = lazydef.class_or_module
@@ -1259,7 +1262,7 @@ class Context
     function_call(type_scope, call_scope, fn, fn.body, arg_types, kwargs, block)
   end
 
-  #: fn(Parser::AST::Node) -> Hash<String, Rbindable>
+  ##: fn(Parser::AST::Node) -> Hash<String, Rbindable>
   def n_kwargs(node)
     raise "not kwargs" unless node.type == :hash
 

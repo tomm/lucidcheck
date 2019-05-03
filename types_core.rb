@@ -52,6 +52,8 @@ def make_robject
   rarray.define(Rfunc.new('length', rinteger, []))
   rarray.define(Rfunc.new('clear', rself, []))
   rarray.define(Rfunc.new('push', rself, [_T]))
+  # XXX doesn't work yet
+  #rarray.define(Rfunc.new('zip', rarray[[rtuple[[_T, _U ]] ]], [rarray[[_U]]]))
   rarray.define(Rfunc.new('<<', rself, [_T]))
   rarray.define(Rfunc.new('*', rself, [rinteger]))
   rarray.define(Rfunc.new('[]', _T, [rinteger]))
