@@ -121,6 +121,7 @@ class Context
     @rhash = @robject.lookup('Hash')[0].metaclass_for
     @rrange = @robject.lookup('Range')[0].metaclass_for
     @rundefined = Rundefined.new
+    @global_check_all = check_all
 
     define_builtins
 
@@ -147,23 +148,29 @@ class Context
   private
 
   def _check(filename, source)
-    begin
-      lines = source.split("\n")
-      @annotations[filename] = (1..lines.length).to_a.zip(lines).select { |item|
-        item[1].strip.slice(0, 3) == '#: '
-      }.map { |i|
-        annotation = i[1].strip.slice(3, i[1].length)  # strip '#: '
-        tokens = AnnotationParser.tokenize(annotation)
-        [i[0], tokens]
-      }.to_h
-      ast = Parser::CurrentRuby.parse(source)
-    rescue StandardError => e
-      # XXX todo - get line number
-      error [nil, :parse_error, e.to_s]
-    else
-      _build_node_filename_map(filename, ast)
-      n_expr(ast)
-    end
+    lines = source.split("\n")
+
+    old_verbosity = scope_top.silent
+
+    # "Check all" annotation
+    scope_top.silent = !@global_check_all && !lines.include?('#:: lucidcheck')
+
+    @annotations[filename] = (1..lines.length).to_a.zip(lines).select { |item|
+      item[1].strip.slice(0, 3) == '#: '
+    }.map { |i|
+      annotation = i[1].strip.slice(3, i[1].length)  # strip '#: '
+      tokens = AnnotationParser.tokenize(annotation)
+      [i[0], tokens]
+    }.to_h
+    ast = Parser::CurrentRuby.parse(source)
+  rescue StandardError => e
+    # XXX todo - get line number
+    error [nil, :parse_error, e.to_s]
+  else
+    _build_node_filename_map(filename, ast)
+    n_expr(ast)
+  ensure
+    scope_top.silent = old_verbosity
   end
 
   ##: fn(Parser::AST::Node, String)
