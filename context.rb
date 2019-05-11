@@ -153,6 +153,7 @@ class Context
 
   private
 
+  #: fn(String, String)
   def _check(filename, source)
     lines = source.split("\n")
 
@@ -654,16 +655,17 @@ class Context
     _begin = n_expr(node.children[0])
     _resbody = n_expr(node.children[1])
     _else = n_expr(node.children[2])
+    else_node = node.children[2]
 
-    if _else == @rnil
-      if _resbody == _begin
-        _resbody
+    if else_node == nil
+      if _resbody.equal?(_begin)
+        _begin
       else
         sum_of_types([_resbody, _begin])
       end
     else
-      if _resbody == _else
-        _resbody
+      if _resbody.equal?(_else)
+        _else
       else
         sum_of_types([_resbody, _else])
       end

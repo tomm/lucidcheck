@@ -751,16 +751,16 @@ class TestLucidCheck < Test::Unit::TestCase
 
   def test_rescue
     assert_equal(
-      [[13, :var_type, 'a', 'Float | Integer', 'String']],
+      [[13, :var_type, 'a', 'Integer | Nil', 'String']],
       parse_str(
         <<-RUBY
           def func1
             begin
-              3
+              :oi
             rescue RuntimeError, StandardError => e
               4
             else
-              5.0
+              nil
             ensure
               'hi'
             end
