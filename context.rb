@@ -307,6 +307,27 @@ class Context
     }))
   end
 
+  def create_blockpass_block(blockpass_node, scope)
+    method_name = blockpass_node.children[0].children[0]
+    body = Parser::AST::Node.new(
+      :send,
+      [
+        Parser::AST::Node.new(
+          :lvar,
+          [:x],
+          { location: blockpass_node.location }
+        ),
+        method_name
+      ],
+      { location: blockpass_node.location }
+    )
+
+    _build_node_filename_map(filename_of_node(blockpass_node), body)
+
+    # XXX scope probably wrong
+    Rblock.new(['x'], body, scope)
+  end
+
   def _build_node_filename_map(filename, node)
     @node_filename_map[node] = filename
     if node.methods.include?(:children) && node.children != nil
@@ -944,9 +965,15 @@ class Context
     name = node.children[1].to_s
     type_scope = node.children[0] ? n_expr(node.children[0]) : scope_top.in_class
     name = node.children[1].to_s
-    arg_nodes = node.children[2..-1]
+    arg_nodes = node.children[2..-1].select { |n| n.type != :block_pass }
     arg_types = arg_nodes.select { |n| n.type != :hash }.map {|n| n_expr(n) }
     kw_arg_node = arg_nodes.find { |n| n.type == :hash }
+    block_pass = node.children[2..-1].find { |n| n.type == :block_pass }
+
+    if block_pass
+      raise "block_pass and explicit block passed. weird" unless block.nil?
+      block = create_blockpass_block(block_pass, scope_top)
+    end
     
     kwargs = if kw_arg_node.nil? then {} else n_kwargs(kw_arg_node) end
 

@@ -1428,4 +1428,20 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
   end
+
+  def test_block_pass
+    assert_equal(
+      [[4, :var_type, 'y', 'Array<String>', 'Integer'],
+       [5, :fn_unknown, 'blorg', 'Integer']],
+      parse_str(
+        <<-RUBY
+          x = []
+          x << 1
+          y = x.map(&:to_s)
+          y = 2
+          z = x.map(&:blorg)
+        RUBY
+      )
+    )
+  end
 end
