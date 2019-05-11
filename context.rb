@@ -21,8 +21,14 @@ class Context
   end
 
   def error_msg(e)
-    filename = filename_of_node(e[0])
-    "#{filename}:#{e[0]&.loc&.line}:#{e[0]&.loc&.column&.+ 1}: E: " +
+    if e[0].is_a?(Array)
+      filename, line, column = e[0]
+    else
+      filename = filename_of_node(e[0])
+      line = e[0]&.loc&.line
+      column = e[0]&.loc&.column&.+ 1
+    end
+    "#{filename}:#{line}:#{column}: E: " +
       case e[1]
       when :invalid_safe_send
         "Use of '&.' operator on non-nullable type '#{e[2]}'"
@@ -165,7 +171,11 @@ class Context
     ast = Parser::CurrentRuby.parse(source)
   rescue StandardError => e
     # XXX todo - get line number
-    error [nil, :parse_error, e.to_s]
+    error [
+      [filename, e.diagnostic.location.line, e.diagnostic.location.column ],
+      :parse_error, 
+      e.to_s
+    ]
   else
     _build_node_filename_map(filename, ast)
     n_expr(ast)

@@ -3,7 +3,10 @@ require 'test/unit'
 require_relative 'context'
 
 def node_to_line_nums(errors)
-  errors.map { |es| [[es[0]&.loc&.line], es[1..-1]].flatten }
+  errors.map { |es| 
+    line = if es[0].is_a?(Array) then es[0][1] else es[0]&.loc&.line end
+    [[line], es[1..-1]].flatten 
+  }
 end
 
 def parse_str(str)
@@ -228,7 +231,7 @@ class TestLucidCheck < Test::Unit::TestCase
     e = $stderr
     $stderr = StringIO.new
     assert_equal(
-      [[nil, :parse_error, 'unexpected token $end']],
+      [[2, :parse_error, 'unexpected token $end']],
       parse_str(
         <<-RUBY
           if true then
