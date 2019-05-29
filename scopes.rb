@@ -55,7 +55,7 @@ class WeakScope < Scope
   # delegate to @parent scope
   def lookup_super; @parent.lookup_super end
   def is_identical_fn_call_in_stack?(node, block); @parent.is_identical_fn_call_in_stack?(node, block) end
-  def define_ivar(rbindable); @parent.define_ivar(rbindable) end
+  def define_ivar(name, rbindable); @parent.define_ivar(name, rbindable) end
   def passed_block; @parent.passed_block end
   def is_constructor; @parent.is_constructor end
   def caller_node; @parent.caller_node end

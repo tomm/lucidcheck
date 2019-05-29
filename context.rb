@@ -156,6 +156,7 @@ class Context
     _check('core', File.open(__dir__ + '/headers/core.rb').read)
 
     @rsymbol = @robject.lookup('Symbol')[0].metaclass_for
+    @rregexp = @robject.lookup('Regexp')[0].metaclass_for
   end
 
   def check(filename, source)
@@ -487,6 +488,8 @@ class Context
       n_logic_op(node)
     when :or
       n_logic_op(node)
+    when :regexp
+      @rregexp
     when :send
       n_send(node)
     when :csend
