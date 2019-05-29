@@ -17,17 +17,29 @@ class Context
   end
 
   def error(e)
-    @errors << e if !scope_top.silent
+    filename, _, _ = error_loc(e)
+    silent =
+      scope_top.silent &&
+      !@global_check_all &&
+      @filename_silent_map[filename] &&
+      e[1] != :annotation_error  # annotation errors are always visible
+    @errors << e unless silent
   end
 
-  def error_msg(e)
+  # returns [filename, line, column]
+  def error_loc(e)
     if e[0].is_a?(Array)
-      filename, line, column = e[0]
+      e[0]
     else
       filename = filename_of_node(e[0])
       line = e[0]&.loc&.line
       column = e[0]&.loc&.column&.+ 1
+      [ filename, line, column ]
     end
+  end
+
+  def error_msg(e)
+    filename, line, column = error_loc(e)
     "#{filename}:#{line}:#{column}: E: " +
       case e[1]
       when :invalid_safe_send
@@ -134,6 +146,8 @@ class Context
     @errors = []
     @annotations = {}
     @required = []
+    #: Hash<String,Boolean>
+    @filename_silent_map = {}
     @node_filename_map = {}
     ##: Array<Scope>
     @scopestack = []
@@ -161,6 +175,7 @@ class Context
 
     # "Check all" annotation
     scope_top.silent = !@global_check_all && !lines.include?('#:: lucidcheck')
+    @filename_silent_map[filename] = scope_top.silent
 
     @annotations[filename] = (1..lines.length).to_a.zip(lines).select { |item|
       item[1].strip.slice(0, 3) == '#: '
