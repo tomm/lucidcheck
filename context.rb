@@ -1148,6 +1148,10 @@ class Context
     if self_type.is_a?(Rconcreteclass) && self_type.specialization[type]
       # a generic type param of the self type
       self_type.specialization[type]
+    elsif type.is_a?(Rsumtype)
+      sum_of_types(type.options.map { |o|
+        to_concrete_type(o, self_type, template_types)
+      })
     elsif type.is_a?(SelfType)
       self_type
     elsif type.is_a?(TemplateType)

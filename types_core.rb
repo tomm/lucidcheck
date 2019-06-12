@@ -59,6 +59,8 @@ def make_robject
   rarray.define(Rfunc.new('uniq', rself, []))
   rarray.define(Rfunc.new('uniq!', rself, []))
   rarray.define(Rfunc.new('[]', _T, [rinteger]))
+  rarray.define(Rfunc.new('first', sum_of_types([_T, rnil]), []))
+  rarray.define(Rfunc.new('last', sum_of_types([_T, rnil]), []))
   rarray.define(Rfunc.new('[]=', _T, [rinteger, _T]))
   rarray.define(Rfunc.new('include?', rboolean, [_T]))
   # XXX incomplete

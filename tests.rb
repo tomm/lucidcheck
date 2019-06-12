@@ -1444,4 +1444,20 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
   end
+
+  def test_generic_in_sum_type
+    assert_equal(
+      [[6, :var_type, 'y', 'Integer | Nil', 'Symbol']],
+      parse_str(
+        <<-RUBY
+          x=[]
+          x.push(1)
+          y = x.first
+          y = nil
+          y = 3
+          y = :hi
+        RUBY
+      )
+    )
+  end
 end
