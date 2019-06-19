@@ -1,3 +1,6 @@
+class Nil
+end
+
 class Integer
   def +; end        #: unsafe fn(Integer) -> Integer
   def -; end        #: unsafe fn(Integer) -> Integer
@@ -11,6 +14,22 @@ class Integer
   def ==; end       #: unsafe fn(Integer) -> Boolean
 end
 
+class Float
+  def +; end        #: unsafe fn(Float) -> Float
+  def -; end        #: unsafe fn(Float) -> Float
+  def *; end        #: unsafe fn(Float) -> Float
+  def /; end        #: unsafe fn(Float) -> Float
+  def >; end        #: unsafe fn(Float) -> Boolean
+  def >=; end       #: unsafe fn(Float) -> Boolean
+  def <; end        #: unsafe fn(Float) -> Boolean
+  def <=; end       #: unsafe fn(Float) -> Boolean
+  def ==; end       #: unsafe fn(Float) -> Boolean
+end
+
+class Boolean
+  def ==; end       #: unsafe fn(Boolean) -> Boolean
+end
+
 class String
   def upcase; end   #: unsafe fn() -> String
   def slice; end    #: unsafe fn(Integer, ?Integer) -> String
@@ -18,6 +37,13 @@ class String
   def +; end        #: unsafe fn(String) -> String
   def ==; end       #: unsafe fn(String) -> Boolean
   def length; end   #: unsafe fn() -> Integer
+end
+
+class File
+  # XXX constructor wrong
+
+  def self.open; end #: unsafe fn(String) -> File
+  def read; end      #: unsafe fn() -> String
 end
 
 class Symbol
@@ -30,3 +56,7 @@ end
 
 class MatchData
 end
+
+class Exception; end
+class StandardError < Exception; end
+class RuntimeError < StandardError; end

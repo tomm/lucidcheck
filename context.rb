@@ -147,6 +147,7 @@ class Context
     _check('core', File.open(__dir__ + '/headers/core.rb').read)
 
     populate_robject(@robject)
+
     @rself = @robject.lookup(:genericSelf)[0]
     @rnil = @robject.lookup('Nil')[0].metaclass_for
     @rboolean = @robject.lookup('Boolean')[0].metaclass_for

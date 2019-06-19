@@ -6,22 +6,18 @@ def populate_robject(robject)
   _U = TemplateType.new
   rself = SelfType.new
   robject.define(rself)
-  # denny is right
+  
   rstring = robject.lookup('String')[0].metaclass_for
   rinteger = robject.lookup('Integer')[0].metaclass_for
+  rfloat   = robject.lookup('Float')[0].metaclass_for
+  rboolean   = robject.lookup('Boolean')[0].metaclass_for
+  rnil   = robject.lookup('Nil')[0].metaclass_for
+
   #rsymbol  = robject.classdef('Symbol', robject)
-  rnil     = robject.classdef('Nil', robject)
-  rfloat   = robject.classdef('Float', robject)
-  rboolean = robject.classdef('Boolean', robject)
   rarray   = robject.classdef('Array', robject, [_T])
   rtuple   = robject.classdef('Tuple', robject, ([TemplateType]*16).map(&:new), can_underspecialize: true)
   rhash    = robject.classdef('Hash', robject, [_K, _V])
   rrange   = robject.classdef('Range', robject, [_T])
-  rfile    = robject.classdef('File', robject)
-  # or is he? :-/
-  rexception = robject.classdef('Exception', robject)
-  rstandarderror = robject.classdef('StandardError', rexception)
-  rruntimeerror = robject.classdef('RuntimeError', rstandarderror)
 
   robject.define(rarray[[rstring]], bind_to: 'ARGV')
   robject.define(rstring, bind_to: '$0')
@@ -37,10 +33,6 @@ def populate_robject(robject)
   robject.define(Rfunc.new('to_f', rfloat, []))
   robject.define(Rfunc.new('to_i', rinteger, []))
   robject.define(Rfunc.new('is_a?', rboolean, [robject.metaclass]))
-
-  # XXX incomplete
-  rfile.metaclass.define(Rfunc.new('open', rfile, [rstring]))
-  rfile.define(Rfunc.new('read', rstring, []))
 
   rrange.define(Rfunc.new("to_a", rarray[[_T]], []))
 
@@ -71,17 +63,6 @@ def populate_robject(robject)
   rarray.define(Rfunc.new('select', rself, [], block_sig: FnSig.new(rboolean, [_T])))
   rarray.define(Rfunc.new('each', rarray[[_T]], [], block_sig: FnSig.new(_U, [_T])))
   rarray.define(Rfunc.new('==', rboolean, [rself]))
-
-  rfloat.define(Rfunc.new('+', rfloat, [rfloat]))
-  rfloat.define(Rfunc.new('-', rfloat, [rfloat]))
-  rfloat.define(Rfunc.new('*', rfloat, [rfloat]))
-  rfloat.define(Rfunc.new('/', rfloat, [rfloat]))
-  rfloat.define(Rfunc.new('>', rboolean, [rfloat]))
-  rfloat.define(Rfunc.new('>=', rboolean, [rfloat]))
-  rfloat.define(Rfunc.new('<', rboolean, [rfloat]))
-  rfloat.define(Rfunc.new('<=', rboolean, [rfloat]))
-
-  rboolean.define(Rfunc.new('==', rboolean, [rboolean]))
 
   robject
 end
