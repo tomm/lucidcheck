@@ -148,7 +148,7 @@ class TestLucidCheck < Test::Unit::TestCase
           end
 
           B.foo(1,2)
-          b = B.new
+          b = B.new('oi')
           b.oi('tom')
           b.hi('bob')
           b.wrong()

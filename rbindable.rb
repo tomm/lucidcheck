@@ -1,7 +1,9 @@
+#:: lucidcheck
 # Something you can assign to a variable
 class Rbindable
   attr_accessor :name, :unsafe, :silent
-  ##: fn(String | Symbol)
+
+  #: fn(String | Symbol)
   def initialize(name)
     @name = name
     @unsafe = false
@@ -12,10 +14,12 @@ class Rbindable
     self
   end
 
+  #: fn(Rbindable) -> Boolean
   def supertype_of?(other)
     false
   end
 
+  #: fn(Rbindable) -> Boolean
   def is_specialization_of?(other)
     false
   end
@@ -117,6 +121,13 @@ class Rfunc < Rbindable
     @can_autocheck = can_autocheck
   end
 
+  def deep_clone
+    c = self.clone
+    c.sig = self.sig.deep_clone
+    c.block_sig = self.block_sig.deep_clone if c.block_sig
+    c
+  end
+
   def type_unknown?
     @sig.type_unknown?
   end
@@ -148,20 +159,23 @@ end
 
 class Rmetaclass < Rbindable
   attr_reader :metaclass_for, :scope
+  attr_accessor :parent # kindof a bodge.
 
   ##: fn(String, Rclass)
   def initialize(parent_name, metaclass_for)
     super("#{parent_name}:Class")
     @scope = Scope.new(self)
     @metaclass_for = metaclass_for
-  end
-
-  def parent
-    @metaclass_for.parent&.metaclass
+    @parent = nil
   end
 
   ##: fn(String) -> Tuple<Rbindable | Nil, Rbindable | Nil>
   def lookup(method_name)
+    r = @scope.lookup(method_name)
+    r[0] == nil && @parent ? @parent.lookup(method_name) : r
+  end
+
+  def own_lookup(method_name)
     @scope.lookup(method_name)
   end
 
@@ -199,6 +213,7 @@ class Rclass < Rbindable
   ##: fn(String, Rclass | Nil, ?Array<TemplateType>, can_underspecialize: Boolean)
   def initialize(name, parent_class, template_params=[], can_underspecialize: false)
     @metaclass = Rmetaclass.new(name, self)
+    @metaclass.parent = parent_class&.metaclass
     super(name)
     @parent = parent_class
     @scope = Scope.new(self)

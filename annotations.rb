@@ -8,6 +8,7 @@ require_relative 'rbindable'
 ## not supported yet:
 # fn<T>(T,T) -> T
 # fn<T,U>(fn(T) -> U, Array<T>) -> Array<U>
+#:: lucidcheck
 class AnnotationParser
   class AnnotationError < RuntimeError; end
 
@@ -16,6 +17,7 @@ class AnnotationParser
     @lookup = lookup
   end
 
+  #: fn(String) -> Array<String>
   def self.tokenize(str)
     tokens = []
     pos = 0

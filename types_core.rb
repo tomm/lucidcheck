@@ -1,5 +1,4 @@
-def make_robject
-  robject = Rclass.new('Object', nil)
+def populate_robject(robject)
 
   _K = TemplateType.new
   _V = TemplateType.new
@@ -8,10 +7,10 @@ def make_robject
   rself = SelfType.new
   robject.define(rself)
   # denny is right
-  rstring  = robject.classdef('String', robject)
+  rstring = robject.lookup('String')[0].metaclass_for
+  rinteger = robject.lookup('Integer')[0].metaclass_for
   #rsymbol  = robject.classdef('Symbol', robject)
   rnil     = robject.classdef('Nil', robject)
-  rinteger = robject.classdef('Integer', robject)
   rfloat   = robject.classdef('Float', robject)
   rboolean = robject.classdef('Boolean', robject)
   rarray   = robject.classdef('Array', robject, [_T])
@@ -26,6 +25,8 @@ def make_robject
 
   robject.define(rarray[[rstring]], bind_to: 'ARGV')
   robject.define(rstring, bind_to: '$0')
+  # XXX wrong. many of these are private on object. actually on Kernel
+  robject.define(Rfunc.new('__dir__', rstring, []))
   robject.define(Rfunc.new('!', rboolean, []))
   robject.define(Rfunc.new('!=', rboolean, [robject]))
   robject.define(Rfunc.new('puts', rnil, [rstring]))
@@ -70,23 +71,6 @@ def make_robject
   rarray.define(Rfunc.new('select', rself, [], block_sig: FnSig.new(rboolean, [_T])))
   rarray.define(Rfunc.new('each', rarray[[_T]], [], block_sig: FnSig.new(_U, [_T])))
   rarray.define(Rfunc.new('==', rboolean, [rself]))
-
-  rstring.define(Rfunc.new('upcase', rstring, []))
-  # XXX incomplete
-  rstring.define(Rfunc.new('split', rarray[[rstring]], [rstring]))
-  rstring.define(Rfunc.new('+', rstring, [rstring]))
-  rstring.define(Rfunc.new('==', rboolean, [rstring]))
-
-  rinteger.define(Rfunc.new('+', rinteger, [rinteger]))
-  rinteger.define(Rfunc.new('-', rinteger, [rinteger]))
-  rinteger.define(Rfunc.new('*', rinteger, [rinteger]))
-  rinteger.define(Rfunc.new('/', rinteger, [rinteger]))
-  rinteger.define(Rfunc.new('%', rinteger, [rinteger]))
-  rinteger.define(Rfunc.new('>', rboolean, [rinteger]))
-  rinteger.define(Rfunc.new('>=', rboolean, [rinteger]))
-  rinteger.define(Rfunc.new('<', rboolean, [rinteger]))
-  rinteger.define(Rfunc.new('<=', rboolean, [rinteger]))
-  rinteger.define(Rfunc.new('==', rboolean, [rinteger]))
 
   rfloat.define(Rfunc.new('+', rfloat, [rfloat]))
   rfloat.define(Rfunc.new('-', rfloat, [rfloat]))

@@ -128,7 +128,25 @@ class Context
     #require "parser/ruby#{ruby_version}"
     
     require "parser/current"
-    @robject = make_robject()
+    @errors = []
+    @annotations = {}
+    @required = []
+    #: Hash<String,Boolean>
+    @filename_silent_map = {}
+    @node_filename_map = {}
+    ##: Array<Scope>
+    @scopestack = []
+
+    # define foundational types
+    @robject = Rclass.new('Object', nil)
+    @rclass = Rclass.new('Class', @robject)
+    @rclass.define(Rfunc.new('new', @robject, []))
+    @robject.metaclass.parent = @rclass
+
+    push_scope(FnScope.new(nil, nil, nil, @robject, nil, nil, !check_all))
+    _check('core', File.open(__dir__ + '/headers/core.rb').read)
+
+    populate_robject(@robject)
     @rself = @robject.lookup(:genericSelf)[0]
     @rnil = @robject.lookup('Nil')[0].metaclass_for
     @rboolean = @robject.lookup('Boolean')[0].metaclass_for
@@ -142,18 +160,6 @@ class Context
     @global_check_all = check_all
 
     define_builtins
-
-    @errors = []
-    @annotations = {}
-    @required = []
-    #: Hash<String,Boolean>
-    @filename_silent_map = {}
-    @node_filename_map = {}
-    ##: Array<Scope>
-    @scopestack = []
-    push_scope(FnScope.new(nil, nil, nil, @robject, nil, nil, !check_all))
-
-    _check('core', File.open(__dir__ + '/headers/core.rb').read)
 
     @rsymbol = @robject.lookup('Symbol')[0].metaclass_for
     @rregexp = @robject.lookup('Regexp')[0].metaclass_for
@@ -177,11 +183,12 @@ class Context
     # "Check all" annotation
     scope_top.silent = !@global_check_all && !lines.include?('#:: lucidcheck')
     @filename_silent_map[filename] = scope_top.silent
+    annot_regex = /#: ([^\n]*)/
 
     @annotations[filename] = (1..lines.length).to_a.zip(lines).select { |item|
-      item[1].strip.slice(0, 3) == '#: '
+      annot_regex.match(item[1])
     }.map { |i|
-      annotation = i[1].strip.slice(3, i[1].length)  # strip '#: '
+      annotation = annot_regex.match(i[1])[1]
       tokens = AnnotationParser.tokenize(annotation)
       [i[0], tokens]
     }.to_h
@@ -833,10 +840,14 @@ class Context
     parent_class_name = node.children[1]&.children&.last&.to_s
     parent_class = parent_class_name == nil ? @robject : scope_top.lookup(parent_class_name)[0]&.metaclass_for
 
-    new_class = Rclass.new(
-      class_name,
-      parent_class
-    )
+    # either re-open a class for modification, or make a new one
+    # XXX should forbid re-opening if the class has been used yet
+    new_class =
+      scope_top.lookup(class_name)[0]&.metaclass_for ||
+      Rclass.new(
+        class_name,
+        parent_class
+      )
 
     scope_top.in_class.define(new_class.metaclass, bind_to: class_name)
 
@@ -844,8 +855,14 @@ class Context
     r = n_expr(node.children[2])
 
     # define a 'new' static method if 'initialize' was not defined
-    if scope_top.in_class.metaclass.lookup('new')[0] == nil
-      scope_top.in_class.metaclass.define(Rfunc.new('new', new_class, checked: false))
+    if new_class.metaclass.own_lookup('new')[0] == nil
+      ctor = parent_class.metaclass.lookup('new')[0]
+      if ctor.is_a?(Rlazydeffunc) then ctor = define_lazydeffunc(ctor) end
+      ctor = ctor.deep_clone
+      # though we have copied the arguments from the parent class's constructor,
+      # return type is this class
+      ctor.return_type = new_class
+      new_class.metaclass.define(ctor)
     end
 
     pop_scope()
@@ -890,7 +907,7 @@ class Context
   end
 
   def read_rhs_type(annotation_node, rhs_node)
-    annot_type = get_annotation_for_node(annotation_node)
+    annot_type = get_annotation_for_node(annotation_node, scope_top)
     if annot_type&.unsafe
       annot_type
     else
@@ -1166,9 +1183,13 @@ class Context
     end
   end
 
-  def get_annotation_for_node(node)
-    if (annot = @annotations[filename_of_node(node)][node.loc.line-1])
-      type, e = AnnotationParser.new(annot, scope_top.method(:lookup)).get_type
+  def get_annotation_for_node(node, scope)
+    this_file_annots = @annotations[filename_of_node(node)]
+    # annotations are removed as they are used, so that they are not
+    # erroneously applied to multiple expressions
+    annot = this_file_annots.delete(node.loc.line) || this_file_annots.delete(node.loc.line - 1)
+    if annot
+      type, e = AnnotationParser.new(annot, scope.method(:lookup)).get_type
       error [node, :annotation_error, e] unless e == nil
       type
     else
@@ -1198,9 +1219,9 @@ class Context
   end
 
   ##: fn(Parser::AST::Node, String, Parser::AST::Node, Parser::AST::Node, Rclass) -> Rfunc
-  def make_method(node, name, args_node, fn_body)
+  def make_method(node, name, scope, args_node, fn_body)
     arg_name_type, optarg_name_type, kwarg_name_type = parse_function_args_def(args_node)
-    annot_type = get_annotation_for_node(node)
+    annot_type = get_annotation_for_node(node, scope)
 
     if annot_type
       fn = annot_type
@@ -1208,9 +1229,9 @@ class Context
       # annotated functions show errors :)
       fn.silent = false
       # XXX update for kwarg nums!! XXX
-      if arg_name_type.length != annot_type.sig.args.length
+      if !fn.unsafe && arg_name_type.length != annot_type.sig.args.length
         error [node, :annotation_error, "Number of arguments (#{arg_name_type.length}) does not match annotation (#{annot_type.sig.args.length})"]
-      elsif optarg_name_type.length != annot_type.sig.optargs.length
+      elsif !fn.unsafe && optarg_name_type.length != annot_type.sig.optargs.length
         error [node, :annotation_error, "Number of optional arguments (#{optarg_name_type.length}) does not match annotation (#{annot_type.sig.optargs.length})"]
       else
         fn.sig.name_anon_args(arg_name_type.map { |nt| nt[0] })
@@ -1248,7 +1269,7 @@ class Context
     if name == 'initialize'
       try_deffun(node, scope_top.in_class.metaclass,
         Rlazydeffunc.new('new', node, scope_top.in_class.metaclass, ->(node, scope) {
-          fn = make_method(node, 'new', node.children[1], node.children[2])
+          fn = make_method(node, 'new', scope, node.children[1], node.children[2])
           fn.is_constructor = true
           if fn.sig.no_args?
             fn.can_autocheck = true
@@ -1263,7 +1284,7 @@ class Context
         node,
         scope_top.in_class,
         Rlazydeffunc.new(name, node, scope_top.in_class, ->(node, scope) {
-          make_method(node, name, node.children[1], node.children[2])
+          make_method(node, name, scope, node.children[1], node.children[2])
         })
       )
       #end
@@ -1312,7 +1333,7 @@ class Context
       node,
       scope_top.in_class.metaclass,
       Rlazydeffunc.new(name, node, scope_top.in_class.metaclass, ->(node, scope) {
-        make_method(node, name, node.children[2], node.children[3])
+        make_method(node, name, scope, node.children[2], node.children[3])
       })
     )
   end

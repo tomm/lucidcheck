@@ -11,6 +11,14 @@ class FnSig
     add_anon_args(anon_args)
   end
 
+  def deep_clone
+    c = FnSig.new(self.return_type, [])
+    c.args = self.args.clone
+    c.optargs = self.optargs.clone
+    c.kwargs = self.kwargs.clone
+    c
+  end
+
   def no_args?
     @args.empty? && @optargs.empty? && @kwargs.empty?
   end
