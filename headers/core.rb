@@ -60,3 +60,11 @@ end
 class Exception; end
 class StandardError < Exception; end
 class RuntimeError < StandardError; end
+
+=begin
+#: class<T>
+class Array
+  def initialize; end    #: unsafe fn() -> Array<T>
+  def push; end          #: unsafe fn(T) -> Self
+end
+=end

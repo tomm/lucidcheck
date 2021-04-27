@@ -552,6 +552,8 @@ class Context
       n_ensure(node)
     when :irange
       n_irange(node)
+    when :erange
+      n_irange(node)
     when :case
       n_case(node)
     when :return
@@ -563,9 +565,12 @@ class Context
       @robject.metaclass
     else
       error [node, :checker_bug, "Lucidcheck Bug! This construct (#{node.type}) is not known"]
-      puts "BUG! #{filename_of_node(node)}, line #{node.loc.line}: unknown AST node type #{node.type}:\r\n#{node}"
+      puts "Lucidcheck BUG! #{filename_of_node(node)}, line #{node.loc.line}: unknown AST node type #{node.type}:\r\n#{node}"
       @rundefined
     end
+  rescue => e
+    puts "Lucidcheck BUG! #{filename_of_node(node)}, line #{node.loc.line}: unhandled exception while running checker"
+    raise e
   end
   
   def n_masgn(node)
@@ -840,6 +845,12 @@ class Context
     class_name = node.children[0].children[1].to_s
     parent_class_name = node.children[1]&.children&.last&.to_s
     parent_class = parent_class_name == nil ? @robject : scope_top.lookup(parent_class_name)[0]&.metaclass_for
+
+    if parent_class_name && parent_class == nil then
+      # type not found
+      error [node, :type_unknown, parent_class_name]
+      return @rundefined
+    end
 
     # either re-open a class for modification, or make a new one
     # XXX should forbid re-opening if the class has been used yet

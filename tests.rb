@@ -1460,4 +1460,29 @@ class TestLucidCheck < Test::Unit::TestCase
       )
     )
   end
+
+  def test_parent_class_not_found
+    assert_equal(
+      [[1, :type_unknown, 'B']],
+      parse_str(
+        <<-RUBY
+          class A < B
+          end
+        RUBY
+      )
+    )
+  end
+
+  def test_range
+    assert_equal(
+      [[3, :var_type, "x", "Range<Integer>", "Array<Integer>"]],
+      parse_str(
+        <<-RUBY
+          x = (0...10)
+          y = x.map{|i| i*2 }
+          x = y
+        RUBY
+      )
+    )
+  end
 end
